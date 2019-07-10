@@ -1,0 +1,52 @@
+---
+title: "Main_Data_Analysis"
+author: "Constantinos Yeles"
+date: "10/07/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r install_libraries}
+BiocManager::install(c("wesanderson","edgeR","rafalib","derfinderPlot"))
+
+```
+
+```{r load_libraries}
+library(tidyverse);library(wesanderson);library(edgeR);library(rafalib)
+suppressPackageStartupMessages(library('derfinder'))
+suppressPackageStartupMessages(library('tidyverse'))
+suppressPackageStartupMessages(library('wesanderson'))
+suppressPackageStartupMessages(library('edgeR'))
+suppressPackageStartupMessages(library('rafalib'))
+```
+```{r date_of_analysis}
+date <- gsub(" ","_",format(Sys.time(), "%b %d %Y"))
+```
+
+
+```{r create_the_matrix}
+path <- "/home/doc_out/"
+smallRNA_files <- list.files(path,pattern = ".xls")
+smallRNA_files <- str_glue("{path}{smallRNA_files}")
+#load the list of files in one table
+DT <- rbindlist(sapply(smallRNA_files,fread,
+                       simplify=FALSE,
+                       #select = c(1,2,4,6),
+                       verbose=getOption("datatable.verbose", TRUE)),
+                use.names= TRUE,idcol="file")  %>%
+  rename(smallRNA= "#Gene")
+
+#sep first column to multiple
+#  separate("#Gene",c("chr","start","end","strand","smallRNA","DQ"), sep = ":") %>% 
+#  as_tibble()
+#make matrix for DE analysis
+dt <- DT %>% group_by(file) %>% select(-RPM) %>%
+  spread(key = "file", value = "ReadCount" )
+# clean the colnames
+names(dt) <- basename(names(dt)) %>% str_remove(".xls")
+
+dt %>% write_tsv("results_matrix_SPAR.txt")
+```
+
+
