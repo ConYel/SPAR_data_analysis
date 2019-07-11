@@ -19,7 +19,9 @@ suppressPackageStartupMessages(library('tidyverse'))
 suppressPackageStartupMessages(library('wesanderson'))
 suppressPackageStartupMessages(library('edgeR'))
 suppressPackageStartupMessages(library('rafalib'))
+suppressPackageStartupMessages(library('data.table'))
 ```
+
 ```{r date_of_analysis}
 date <- gsub(" ","_",format(Sys.time(), "%b %d %Y"))
 ```
@@ -27,7 +29,7 @@ date <- gsub(" ","_",format(Sys.time(), "%b %d %Y"))
 
 ```{r create_the_matrix}
 path <- "/home/doc_out/"
-smallRNA_files <- list.files(path,pattern = ".xls")
+smallRNA_files <- list.files(path,pattern = "smRNA_gene_expression.xls", recursive = TRUE)
 smallRNA_files <- str_glue("{path}{smallRNA_files}")
 #load the list of files in one table
 DT <- rbindlist(sapply(smallRNA_files,fread,
