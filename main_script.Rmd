@@ -28,7 +28,7 @@ date <- gsub(" ","_",format(Sys.time(), "%b %d %Y"))
 
 
 ```{r create_the_matrix}
-path <- "/home/doc_out/"
+path <- "/home/"
 smallRNA_files <- list.files(path,pattern = "smRNA_gene_expression.xls", recursive = TRUE)
 smallRNA_files <- str_glue("{path}{smallRNA_files}")
 #load the list of files in one table
@@ -46,7 +46,20 @@ DT <- rbindlist(sapply(smallRNA_files,fread,
 dt <- DT %>% group_by(file) %>% select(-RPM) %>%
   spread(key = "file", value = "ReadCount" )
 # clean the colnames
-names(dt) <- basename(names(dt)) %>% str_remove(".xls")
+names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>% 
+  str_remove("/home/") %>% 
+  str_remove(".trimmed_.+") %>% 
+  str_replace("^?","S")
+  
+targets_file <- fread("/home/tex.xls") %>% 
+  as_tibble() %>% 
+  select(samples,my_col, tissue, total_region, S_P, dev_stage, Reads, Note, Sample_ID, Sex, Years) %>% 
+  mutate(my_col = str_replace(my_col,"^?","S"))
+
+target <- match(names(dt),targets_file$my_col,nomatch = 0)
+dt1 <- dt
+names(dt1)[names(dt1) %in% targets_file$my_col] <- as.character(targets_file$my_col[target])
+tibble(names(dt1), names(dt)) %>% view()
 
 dt %>% write_tsv("results_matrix_SPAR.txt")
 ```
