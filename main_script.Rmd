@@ -58,10 +58,28 @@ targets_file <- fread("/home/tex.xls") %>%
 
 target <- match(names(dt),targets_file$my_col,nomatch = 0)
 dt1 <- dt
-names(dt1)[names(dt1) %in% targets_file$my_col] <- as.character(targets_file$my_col[target])
+names(dt1)[names(dt1) %in% targets_file$my_col] <- as.character(targets_file$samples[target])
 tibble(names(dt1), names(dt)) %>% view()
 
 dt %>% write_tsv("results_matrix_SPAR.txt")
 ```
 
+
+```{r preprocessing}
+my_exp <- "brain" 
+
+# Subset the matrix and link the correct names
+mat <- read_tsv(list.files(pattern = ".txt")) %>% 
+  select(-GeneClass) %>% 
+  column_to_rownames("smallRNA") %>% as.matrix()
+
+targets_file <- targets_file %>% 
+  filter(tissue == "Brain", dev_stage == "Adult",!my_col=="NA")
+
+mat <- mat[,targets_file$my_col]  
+
+# create df for limma groups
+
+
+```
 
