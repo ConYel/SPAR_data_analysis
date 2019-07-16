@@ -53,12 +53,12 @@ names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>%
 targets_file <- fread("/home/tex.xls") %>% 
   as_tibble() %>% 
   select(samples,my_col,data_sequenziamento, tissue, total_region, S_P, dev_stage, Reads, Note, Sample_ID, Sex, Years) %>% 
-  mutate(my_col = str_replace(my_col,"^?","S"), data_sequenziamento = )
+  mutate(my_col = str_replace(my_col,"^?","S"), data_sequenziamento = as.Date(data_sequenziamento,tryFormats = c( "%d/%m/%Y")))
 
 target <- match(names(dt),targets_file$my_col,nomatch = 0)
-dt1 <- dt
-names(dt1)[names(dt1) %in% targets_file$my_col] <- as.character(targets_file$samples[target])
-tibble(names(dt1), names(dt)) %>% view()
+#dt1 <- dt
+names(dt)[names(dt) %in% targets_file$my_col] <- as.character(targets_file$samples[target])
+#tibble(names(dt1), names(dt)) 
 
 dt %>% write_tsv(str_glue("results_matrix_{date}_SPAR.txt"))
 ```
@@ -69,21 +69,33 @@ my_exp <- "brain"
 # Subset the matrix and link the correct names ----
 mat <- read_tsv(list.files(pattern = ".txt")[1]) %>% 
   select(-GeneClass) %>% 
-  column_to_rownames("smallRNA") %>% as.matrix()
+  column_to_rownames("smallRNA") %>% 
+  as.matrix()
 
 targets_file <- targets_file %>% 
   filter(tissue == "Brain", dev_stage == "Adult",!my_col=="NA")
+
+# filter again for samples with more than one rep ----
+reps_samples <- targets_file %>% 
+  filter(duplicated(total_region)) %>% 
+  select(total_region) %>% 
+  distinct()
+
+targets_file <- targets_file %>% 
+  filter(total_region %in% reps_samples$total_region)
 
 mat <- mat[,targets_file$my_col]  
 
 # create df for limma groups ----
 group <- as_factor(targets_file$total_region)
-batch <- as_factor(c(targets_file$Sample_ID[1:29],30:34))
+#batch <- as_factor(c(targets_file$Sample_ID[1:29],30:34))
+batch <- as_factor(c(targets_file$Sample_ID[1:21],22:26))
 samples <- data.frame(group,batch,row.names = colnames(mat))
 
 # create the dge object and design ----
 x <- DGEList(counts = mat,samples = samples,lib.size = colSums(mat),norm.factors = rep(1,ncol(mat)))
-design <- model.matrix(~0+group+batch)
+#design <- model.matrix(~0+group+batch)
+design <- model.matrix(~0+group)
 colnames(design) <- gsub("group","",colnames(design))
 rownames(design) <- rownames(samples)
 
@@ -160,41 +172,73 @@ dev.off()
 # normalization
 ```{r normalization and boxplot}
 x1_TMM <- calcNormFactors(x1, method = "TMM")
-x1_TMMwzp <- calcNormFactors(x1, method = "TMMwzp")
-#x1_voomTMM <- voomWithQualityWeights(x1_TMM,design = design,plot = TRUE)
-#x1_voomQ <- voomWithQualityWeights(x1,design = design,normalize.method = "quantile",plot = TRUE)
+x1_TMMwsp <- calcNormFactors(x1, method = "TMMwsp")
+x1_voomTMM <- voomWithQualityWeights(x1_TMM,design = design,plot = TRUE)
+x1_voomQ <- voomWithQualityWeights(x1,design = design,normalize.method = "quantile",plot = TRUE)
 
 lcpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, log=TRUE, prior.count=5)
-lcpm_TMMwzp <- cpm(x1_TMMwzp,normalized.lib.sizes = TRUE, log=TRUE, prior.count=5)
+lcpm_TMMwsp <- cpm(x1_TMMwsp,normalized.lib.sizes = TRUE, log=TRUE, prior.count=5)
 
 cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE)
-cpm_TMMwzp <- cpm(x1_TMMwzp,normalized.lib.sizes = TRUE)
+cpm_TMMwsp <- cpm(x1_TMMwsp,normalized.lib.sizes = TRUE)
 
 #write_rds(x1_TMM,str_glue("x1_TMMwzp_{experiment}_{date}.rds"))
 #x1_voomTMM <- read_rds("~/Documents/new_analysis_workflow/results_R/results_with_DBs/3_IPP_PIWIL1_all_DBs/x1_voomTMM.rds")
-par(mar=c(8.5,5,1,1))
+par(mar=c(9,5,1,1))
+par(mfrow= c(1,1))
 #raw data
 lcpm <- cpm(x1,log=TRUE,prior.count=5)
+
 pdf(str_glue("boxplot_TMM_{date}_{my_exp}.pdf"))
+
 boxplot(lcpm, las= 2, col= x1$colours, main="", names=group)
 title(main="A. Not Normalized filtered data",ylab="Log-cpm")
 #TMM data
 boxplot(lcpm_TMM, las=2, col= x1$colours, main="",names=group)
 title(main="A. TMM Normalized filtered data",ylab="Log-cpm")
+#TMMwsp data
+boxplot(lcpm_TMMwsp, las=2, col= x1$colours, main="",names=group)
+title(main="A. TMMwsp Normalized filtered data",ylab="Log-cpm")
+#x1_voomTMM data
+boxplot(x1_voomTMM$E, las=2, col= x1$colours, main="",names=group)
+title(main="A. voomTMM Normalized filtered data",ylab="Log-cpm")
+#x1_voomQ data
+boxplot(x1_voomQ$E, las=2, col= x1$colours, main="",names=group)
+title(main="A. voomQ Normalized filtered data",ylab="Log-cpm")
 dev.off()
 ```
-# make hclustering
+# make h-clustering
 ```{r Hierarchical clustering}
+norm_l <- list("raw" = lcpm, "TMM" = lcpm_TMM, "TMMwsp" = lcpm_TMMwsp,
+               "voomTMM_QW" = x1_voomTMM$E, "voomQ_QW" = x1_voomQ$E)
+hc_methods <- c("ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+l_d <- lapply(norm_l,function(x)dist(t(x)))
+
+l_hc <- sapply(hc_methods, function(x) lapply(l_d, function(y) hclust(y,method = x)))
+
+names(l_hc) <- sapply(rownames(l_hc[]), function(x)rep(x,each = ncol(l_hc)))
+
+for (i in seq_along(l_hc)) {
+  myplclust(l_hc[[i]],lab.col = x1$colours,labels = x1_TMM$samples$group,
+       xlab = str_glue("{names(l_hc[i])}"), 
+       main = str_glue("{enframe(l_hc[[i]])$value[7]} - {enframe(l_hc[[i]])$value[5]} - region"))
+}
+
+#sapply(l_hc,function(x)myplclust(x,lab.col = x1$colours,labels = x1_TMM$samples$group,
+#       xlab = str_glue("{names(x)}"), main = str_glue("{enframe(x)$value[7]} - {enframe(x)$value[5]} - region")))
+
+
 pdf(str_glue("hierach_clust_plot_{date}_{my_exp}.pdf"))
 par(mfrow=c(1,1))
-d <- dist(t(lcpm_TMM))
-hc <- hclust(d,method = "ward.D2")
+
+#d <- dist(t(lcpm_TMM))
+
 par(mar=c(7,3,2,2))
 myplclust(hc,lab.col = x1$colours,labels = x1_TMM$samples$group,
           xlab = "",main="euclidean-ward.D2 - region")
 myplclust(hc,lab.col = x1$colours,labels = targets_file$Years,
           xlab = "",main="euclidean-ward.D2 - age")
-myplclust(hc,lab.col = x1$colours,labels = targets_file$Years,
+myplclust(hc,lab.col = x1$colours,labels = targets_file$data_sequenziamento,
           xlab = "",main="euclidean-ward.D2 - year of run")
 
 legend("topright",legend = levels(group),
@@ -224,5 +268,19 @@ legend("topright",legend = levels(group),
        bty="n",
        cex = 0.6)
 dev.off()
+
+```
+# make MDS plot
+```{r}
+par(mfrow=c(1,2))
+par(mar=c(6,5,2,1)+ 0.1)
+
+plotMDS(lcpm_TMM,labels = targets_file$total_region,
+                col=x1_TMM$colours,dim.plot = c(1,2))
+
+
+
+plotMDS(lcpm_TMM, labels = targets_file$Years,
+                col=x1_TMM$colours,dim.plot = c(1,2),main="MDS plot")
 ```
 
