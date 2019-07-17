@@ -209,15 +209,26 @@ dev.off()
 ```
 # make h-clustering
 ```{r Hierarchical clustering}
-norm_l <- list("raw" = lcpm, "TMM" = lcpm_TMM, "TMMwsp" = lcpm_TMMwsp,
-               "voomTMM_QW" = x1_voomTMM$E, "voomQ_QW" = x1_voomQ$E)
-hc_methods <- c("ward.D2", "single", "complete", "average", "mcquitty", "median", "centroid")
+
+norm_l <- list(
+               #"raw" = lcpm, 
+               "TMM" = lcpm_TMM, 
+               #"TMMwsp" = lcpm_TMMwsp,
+               "voomTMM_QW" = x1_voomTMM$E, 
+               "voomQ_QW" = x1_voomQ$E)
+hc_methods <- c("ward.D2", 
+                "single", 
+                "complete", 
+                "average", 
+                #"median", "centroid",
+                "mcquitty")
 l_d <- lapply(norm_l,function(x)dist(t(x)))
 
 l_hc <- sapply(hc_methods, function(x) lapply(l_d, function(y) hclust(y,method = x)))
 
-names(l_hc) <- sapply(rownames(l_hc[]), function(x)rep(x,each = ncol(l_hc)))
+names(l_hc) <- rep(rownames(l_hc),times = ncol(l_hc)) 
 
+pdf(str_glue("hierach_clust_plot_{date}_{my_exp}.pdf"))
 for (i in seq_along(l_hc)) {
   myplclust(l_hc[[i]],lab.col = x1$colours,labels = x1_TMM$samples$group,
        xlab = str_glue("{names(l_hc[i])}"), 
@@ -227,47 +238,21 @@ for (i in seq_along(l_hc)) {
 #sapply(l_hc,function(x)myplclust(x,lab.col = x1$colours,labels = x1_TMM$samples$group,
 #       xlab = str_glue("{names(x)}"), main = str_glue("{enframe(x)$value[7]} - {enframe(x)$value[5]} - region")))
 
-
-pdf(str_glue("hierach_clust_plot_{date}_{my_exp}.pdf"))
-par(mfrow=c(1,1))
+dev.off()
 
 #d <- dist(t(lcpm_TMM))
+#par(mar=c(7,3,2,2))
+#myplclust(hc,lab.col = x1$colours,labels = x1_TMM$samples$group,
+#          xlab = "",main="euclidean-ward.D2 - region")
+#myplclust(hc,lab.col = x1$colours,labels = targets_file$Years,
+#          xlab = "",main="euclidean-ward.D2 - age")
+#myplclust(hc,lab.col = x1$colours,labels = targets_file$data_sequenziamento,
+#          xlab = "",main="euclidean-ward.D2 - year of run")
 
-par(mar=c(7,3,2,2))
-myplclust(hc,lab.col = x1$colours,labels = x1_TMM$samples$group,
-          xlab = "",main="euclidean-ward.D2 - region")
-myplclust(hc,lab.col = x1$colours,labels = targets_file$Years,
-          xlab = "",main="euclidean-ward.D2 - age")
-myplclust(hc,lab.col = x1$colours,labels = targets_file$data_sequenziamento,
-          xlab = "",main="euclidean-ward.D2 - year of run")
-
-legend("topright",legend = levels(group),
-       fill = x1$colours,
-       bty="n",
-       cex = 0.6)
-
-hc <- hclust(d,method = "complete")
-myplclust(hc,lab.col = x1$colours,
-          labels = x1_TMM$samples$group, xlab = "",
-          main="euclidean-complete - region")
-myplclust(hc,lab.col = x1$colours, labels = targets_file$Years,
-          xlab = "",main="euclidean-complete - age")
-legend("topright",legend = levels(group),
-       fill = x1$colours,
-       bty="n",
-       cex = 0.6)
-
-hc <- hclust(d,method = "average")
-myplclust(hc,lab.col = x1$colours, labels = x1_TMM$samples$group,
-          xlab = "",main="euclidean-average - region")
-myplclust(hc,lab.col = x1$colours, labels = targets_file$Years,
-          xlab = "",main="euclidean-average - age")
-
-legend("topright",legend = levels(group),
-       fill = x1$colours,
-       bty="n",
-       cex = 0.6)
-dev.off()
+#legend("topright",legend = levels(group),
+#       fill = x1$colours,
+#       bty="n",
+#       cex = 0.6)
 
 ```
 # make MDS plot
