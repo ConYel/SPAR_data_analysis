@@ -52,10 +52,16 @@ names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>%
   str_replace("^?","S")
  
 targ_path <- dir(pattern = "tex.xls", recursive = TRUE)
+#targ_path <- dir(pattern = "Sra", recursive = TRUE)
+
 targets_file <- fread(targ_path) %>%
   as_tibble() %>%
   select(samples,my_col,data_sequenziamento, tissue, total_region, S_P, dev_stage, Reads, Note, Sample_ID, Sex, Years) %>%
   mutate(my_col = str_replace(my_col,"^?","S"), data_sequenziamento = as.Date(data_sequenziamento,tryFormats = c( "%d/%m/%Y")))
+
+targets_file <- fread(targ_path) %>%
+  as_tibble() %>%
+  dplyr::select(Run, classification) 
 
 target <- match(names(dt),targets_file$my_col,nomatch = 0)
 #dt1 <- dt
@@ -63,11 +69,12 @@ names(dt)[names(dt) %in% targets_file$my_col] <- as.character(targets_file$sampl
 #tibble(names(dt1), names(dt))
 
 writting_path <- str_remove(targ_path,"tex.xls")
-dt %>% write_tsv(str_glue("{writting_path}results_matrix_{date}_SPAR.txt"))
+writting_path <- str_glue("/home/rstudio/SPAR_data_analysis/results_matrix_{date}_SPAR.txt")
+dt %>% write_tsv(writting_path)
 ```
 # make the dge object and filter for low expressed small RNAs
 ```{r 1st step preprocessing}
-my_exp <- "brain"
+my_exp <- "brain_GSE63501"
 
 # Subset the matrix and link the correct names ----
 mat <- read_tsv(list.files(pattern = "_SPAR.txt",recursive = TRUE)[1]) %>%
@@ -119,7 +126,7 @@ pal1 <- wes_palette(length(levels(as.factor(targets_file$data_sequenziamento))),
   mutate(
     date_seq = as.factor(levels(as.factor(targets_file$data_sequenziamento))))
 
-x1$col_<- inner_join(x1$samples,pal,by= "group")$value
+x1$colours<- inner_join(x1$samples,pal,by= "group")$value
 # col_date <- enframe(as.factor(targets_file$data_sequenziamento), name = NULL, value = "date_seq")  
 
 # x1$col_date <- inner_join(col_date,pal1,by= "date_seq")
@@ -242,13 +249,13 @@ names(l_hc) <- rep(rownames(l_hc),times = ncol(l_hc))
 pdf(str_glue("{writting_path}hierach_clust_plot_{date}_{my_exp}.pdf"))
 for (i in seq_along(l_hc)) {
   myplclust(l_hc[[i]],
-            lab.col = x1$col_date$value, #x1$colours,pal1$value
+            lab.col = x1$colours, #x1$colours,pal1$value
             labels = x1_TMM$samples$group,#pal1$group
        xlab = str_glue("{names(l_hc[i])}"),
        main = str_glue("{enframe(l_hc[[i]])$value[7]} - {enframe(l_hc[[i]])$value[5]} - region"))
   legend("topright",
-       legend = levels(x1$col_date$date_seq),
-       fill = levels(as_factor(x1$col_date$value)), #x1$colours  
+       legend = levels(x1$samples$group),
+       fill = levels(as_factor(x1$colours)), #x1$colours  
        bty="n",
        cex = 0.9)
 }
@@ -278,7 +285,7 @@ dev.off()
 par(mfrow=c(1,2))
 par(mar=c(6,5,2,1)+ 0.1)
 
-plotMDS(lcpm_TMM,labels = targets_file$total_region,
+plotMDS(lcpm_TMM,labels = targets_file$classification,
                 col=x1_TMM$colours,dim.plot = c(1,2))
 
 
