@@ -372,7 +372,41 @@ res_AD_vs_Control <- res_AD_vs_Control %>% as_tibble(rownames = "GeneID") %>%
   write_tsv(str_glue("{writting_path}res_AD_vs_Ctrl_DEseq2_{date}_{my_exp}.txt"))
 
 # edgeR  ----
+plotMD(x1_TMM,column = 4)
+x1_TMM <- estimateDisp(x1_TMM, design=design, robust=TRUE)
+plotBCV(x1_TMM)
+fit <- glmQLFit(x1_TMM, design, robust = TRUE)
+head(fit$coefficients)
+plotQLDisp(fit)
 
+con_mat <- makeContrasts(
+  IPP_C_vs_noAb = IPP_C_Ab-IPP_noAb,
+  IPP_N_vs_noAb = IPP_N_Ab-IPP_noAb,
+  IPP_INPUT_vs_noAb = IPP_INPUT-IPP_noAb,
+  IPP_C_vs_INPUT = IPP_C_Ab-IPP_INPUT,
+  IPP_N_vs_INPUT = IPP_N_Ab-IPP_INPUT,
+  levels = design
+)
+
+res_AD_vs_Control <- glmQLFTest(fit,coef = 2)
+
+res_C_nAb <- glmQLFTest(fit,contrast = 0)
+
+
+is.de <- decideTests(res_AD_vs_Control)
+summary(is.de)
+plotMD(res_AD_vs_Control,status = is.de,values = c(1,-1),
+       col = c("red","blue"),legend="topright")
+top<- topTags(res_AD_vs_Control,n=100)
+res %>% as_tibble()
+path <- "data/new_analysis_workflow/test_DE_methods/IP_DATA/"
+
+topres_AD_vs_Control <- topTags(res_AD_vs_Control, n = nrow(res_AD_vs_Control), 
+                            adjust.method = "BH", 
+                            sort.by = "PValue", 
+                            p.value = 1)$table %>% 
+  as_tibble(rownames = "smallRNA") %>% 
+  write_tsv(str_glue("{writting_path}res_AD_vs_Ctrl_edger_{date}_{my_exp}.txt"))
 
 # voom   ----
 ```
