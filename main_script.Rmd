@@ -285,11 +285,27 @@ dev.off()
 par(mfrow=c(1,2))
 par(mar=c(6,5,2,1)+ 0.1)
 
-plotMDS(lcpm_TMM,labels = targets_file$classification,
+pdf(str_glue("{writting_path}MDS_TMM_{date}_{my_exp}.pdf"))
+plotMDS(lcpm_TMM,labels = str_glue("{targets_file$Run}"),
                 col=x1_TMM$colours,dim.plot = c(1,2))
+legend("topright",
+       legend= levels(as_factor(targets_file$classification)),
+       fill = levels(as_factor(x1$colours)),
+       bty="n",
+       cex = 1.5, inset = c(.01,.09) )
 
 
-
-plotMDS(lcpm_TMM, labels = targets_file$Years,
-                col=x1_TMM$colours,dim.plot = c(1,2),main="MDS plot")
+plotMDS(lcpm_TMM, labels = str_glue("{targets_file$Run}"),
+                col=x1_TMM$colours,dim.plot = c(3,4),main="MDS plot")
+dev.off()
 ```
+# make PCA plot
+```{r}
+library(DESeq2)
+# make the Deseq dataset
+
+
+```
+
+
+
