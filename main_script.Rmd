@@ -304,20 +304,21 @@ dev.off()
 # make PCA plot
 ```{r}
 library(DESeq2)
-# make the Deseq dataset
+# make the Deseq dataset -----
 dds <- DESeqDataSetFromMatrix(countData = round(x1$counts),
                               colData = targets_file,
                               design = ~ classification )
-#vst
+#vst -----
 vsd <- vst(dds, blind = FALSE)
 head(assay(vsd), 3)
 sampleDists <- dist(t(assay(vsd)))
 sampleDistMatrix <- as.matrix( sampleDists )
-#rlog
+#rlog -----
 rld <- rlog(dds, blind = FALSE)
 
 dds1 <- estimateSizeFactors(dds)
 
+# check the transformations -----
 df <- bind_rows(
   as_data_frame(log2(counts(dds1, normalized=TRUE)[, 1:2]+1)) %>%
     mutate(transformation = "log2(x + 1)"),
@@ -326,18 +327,25 @@ df <- bind_rows(
 
 colnames(df)[1:2] <- c("x", "y")  
 
+# plot them
 ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
   coord_fixed() + facet_grid( . ~ transformation)  
-
+# PCA -----
 pdf(str_glue("{writting_path}PCA_VST_DEseq2_{date}_{my_exp}.pdf"))
 DESeq2::plotPCA(vsd, intgroup = "classification")
 dev.off()
-
+# MDS -----
 mds <- as.data.frame(colData(vsd))  %>%
   cbind(cmdscale(sampleDistMatrix))
 ggplot(mds, aes(x = `1`, y = `2`, color = classification)) +
   geom_point(size = 3) + coord_fixed()
 
+```
+# DE analysis
+```{r}
+# DEseq2 ----
+# edgeR  ----
+# voom   ----
 ```
 
 
