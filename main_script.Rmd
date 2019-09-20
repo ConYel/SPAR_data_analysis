@@ -2,7 +2,9 @@
 title: "Main_Data_Analysis"
 author: "Constantinos Yeles"
 date: "10/07/2019"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 editor_options:
   chunk_output_type: console
 ---
@@ -303,7 +305,38 @@ dev.off()
 ```{r}
 library(DESeq2)
 # make the Deseq dataset
+dds <- DESeqDataSetFromMatrix(countData = round(x1$counts),
+                              colData = targets_file,
+                              design = ~ classification )
+#vst
+vsd <- vst(dds, blind = FALSE)
+head(assay(vsd), 3)
+sampleDists <- dist(t(assay(vsd)))
+sampleDistMatrix <- as.matrix( sampleDists )
+#rlog
+rld <- rlog(dds, blind = FALSE)
 
+dds1 <- estimateSizeFactors(dds)
+
+df <- bind_rows(
+  as_data_frame(log2(counts(dds1, normalized=TRUE)[, 1:2]+1)) %>%
+    mutate(transformation = "log2(x + 1)"),
+  as_data_frame(assay(vsd)[, 1:2]) %>% mutate(transformation = "vst"),
+  as_data_frame(assay(rld)[, 1:2]) %>% mutate(transformation = "rlog"))
+
+colnames(df)[1:2] <- c("x", "y")  
+
+ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
+  coord_fixed() + facet_grid( . ~ transformation)  
+
+pdf(str_glue("{writting_path}PCA_VST_DEseq2_{date}_{my_exp}.pdf"))
+DESeq2::plotPCA(vsd, intgroup = "classification")
+dev.off()
+
+mds <- as.data.frame(colData(vsd))  %>%
+  cbind(cmdscale(sampleDistMatrix))
+ggplot(mds, aes(x = `1`, y = `2`, color = classification)) +
+  geom_point(size = 3) + coord_fixed()
 
 ```
 
