@@ -29,9 +29,11 @@ date <- gsub(" ","_",format(Sys.time(), "%b %d %Y"))
 ```
 # import data and make dataframe
 ```{r create_the_df}
-path <- "/home/"
+path <- "/home/rstudio/data/GSE63501_16_CTRL_AD"
 setwd(path)
-smallRNA_files <- dir(path,pattern = "smRNA_gene_expression.xls", recursive = TRUE)
+smallRNA_files <- dir(path, full.names = TRUE,
+                      pattern = "smRNA_gene_expression.xls",
+                      recursive = TRUE)
 #smallRNA_files <- str_glue("{path}{smallRNA_files}")
 #load the list of files in one table
 DT <- rbindlist(sapply(smallRNA_files,fread,
@@ -52,30 +54,34 @@ names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>%
   str_remove(".+/my_data/") %>%
   str_remove(".trimmed_.+") %>%
   str_replace("^?","S")
- 
+
+names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>%
+  str_remove(".+/data/.+AD/") %>%
+  str_remove(".trimmed_.+")
+
 targ_path <- dir(pattern = "tex.xls", recursive = TRUE)
 #targ_path <- dir(pattern = "Sra", recursive = TRUE)
 
-targets_file <- fread(targ_path) %>%
-  as_tibble() %>%
-  select(samples,my_col,data_sequenziamento, tissue, total_region, S_P, dev_stage, Reads, Note, Sample_ID, Sex, Years) %>%
-  mutate(my_col = str_replace(my_col,"^?","S"), data_sequenziamento = as.Date(data_sequenziamento,tryFormats = c( "%d/%m/%Y")))
+#targets_file <- fread(targ_path) %>%
+#  as_tibble() %>%
+#  select(samples,my_col, data_sequenziamento, tissue, total_region, S_P, dev_stage, Reads, Note, Sample_ID, Sex, Years) %>%
+#  mutate(my_col = str_replace(my_col,"^?","S"), data_sequenziamento = as.Date(data_sequenziamento,tryFormats = c( "%d/%m/%Y")))
 
-targets_file <- fread(targ_path) %>%
-  as_tibble() %>%
-  dplyr::select(Run, classification) 
+targets_file <- fread(targ_path, select = c("Run","classification")) %>%
+  as_tibble() 
 
-target <- match(names(dt),targets_file$my_col,nomatch = 0)
+target <- match(names(dt),targets_file$Run,nomatch = 0)
 #dt1 <- dt
-names(dt)[names(dt) %in% targets_file$my_col] <- as.character(targets_file$samples[target])
+names(dt)[names(dt) %in% targets_file$Run] <- as.character(targets_file$samples[target])
 #tibble(names(dt1), names(dt))
 
 writting_path <- str_remove(targ_path,"tex.xls")
-writting_path <- str_glue("/home/rstudio/SPAR_data_analysis/results_matrix_{date}_SPAR.txt")
+writting_path <- str_glue("/home/rstudio/SPAR_data_analysis/results_matrix_{date}_{my_exp}_SPAR.txt")
 dt %>% write_tsv(writting_path)
 ```
 # make the dge object and filter for low expressed small RNAs
 ```{r 1st step preprocessing}
+writting_path <- "/home/rstudio/data/GSE63501_16_CTRL_AD/"
 my_exp <- "brain_GSE63501"
 
 # Subset the matrix and link the correct names ----
@@ -99,15 +105,21 @@ targets_file <- targets_file %>%
 mat <- mat[,targets_file$my_col]  
 
 # create df for limma groups ----
-group <- as_factor(str_glue("{targets_file$total_region}_{targets_file$tissue}")) %>% str_replace(" ","_")
+group <- as_factor(str_glue("{targets_file$total_region}_{targets_file$tissue}")) %>% 
+  str_replace(" ","_")
+
+group <- as_factor(targets_file$classification)
+
 #batch <- as_factor(c(targets_file$Sample_ID[1:29],30:34))
 batch <- as_factor(c(targets_file$Sample_ID[1:23],24:length(targets_file$Sample_ID)))
+
 samples <- data.frame(group,batch,row.names = colnames(mat))
+samples <- data.frame(group, Run = targets_file$Run, row.names = colnames(mat))
 
 # create the dge object and design ----
 x <- DGEList(counts = mat,samples = samples,lib.size = colSums(mat),norm.factors = rep(1,ncol(mat)))
 #design <- model.matrix(~0+group+batch)
-design <- model.matrix(~0+group)
+design <- model.matrix(~group)
 colnames(design) <- gsub("group","",colnames(design))
 rownames(design) <- rownames(samples)
 
@@ -122,15 +134,15 @@ pal <- wes_palette(length(levels(x1$samples$group)), name = "Darjeeling1", type 
   enframe(name = NULL) %>%
   mutate(group = as_factor(levels(x1$samples$group)))
 
-# another pal
+# another pal ----
 pal1 <- wes_palette(length(levels(as.factor(targets_file$data_sequenziamento))), name = "Darjeeling1", type = "continuous") %>%
   enframe(name = NULL) %>%
   mutate(
     date_seq = as.factor(levels(as.factor(targets_file$data_sequenziamento))))
 
-x1$colours<- inner_join(x1$samples,pal,by= "group")$value
+# add color to the data x1 ----
+x1$colours <- inner_join(x1$samples,pal,by= "group")$value
 # col_date <- enframe(as.factor(targets_file$data_sequenziamento), name = NULL, value = "date_seq")  
-
 # x1$col_date <- inner_join(col_date,pal1,by= "date_seq")
 ```
 # make density plot and histogram
