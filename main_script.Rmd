@@ -320,6 +320,8 @@ library(DESeq2)
 dds <- DESeqDataSetFromMatrix(countData = round(x1$counts),
                               colData = targets_file,
                               design = ~ classification )
+dds$classification <- relevel(dds$classification, ref = "Control")
+
 #vst -----
 vsd <- vst(dds, blind = FALSE)
 head(assay(vsd), 3)
@@ -356,7 +358,22 @@ ggplot(mds, aes(x = `1`, y = `2`, color = classification)) +
 # DE analysis
 ```{r}
 # DEseq2 ----
+dds <- DESeq(dds)
+res <- results(dds)
+summary(res)
+resultsNames(dds)
+
+res_AD_vs_Control <- results(dds, name="classification_AD_vs_Control" , alpha = 0.05) 
+
+res_AD_vs_Control <- res_AD_vs_Control %>% as_tibble(rownames = "GeneID") %>% 
+  arrange(padj) %>% 
+ # inner_join(genes) %>% 
+ # select(GeneID,gene_name, everything()) %>% 
+  write_tsv(str_glue("{writting_path}res_AD_vs_Ctrl_DEseq2_{date}_{my_exp}.txt"))
+
 # edgeR  ----
+
+
 # voom   ----
 ```
 
