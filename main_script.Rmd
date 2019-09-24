@@ -27,9 +27,10 @@ suppressPackageStartupMessages(library('data.table'))
 ```{r date_of_analysis}
 date <- gsub(" ","_",format(Sys.time(), "%b %d %Y"))
 ```
+
 # import data and make dataframe
 ```{r create_the_df}
-path <- "/home/rstudio/data/GSE63501_16_CTRL_AD"
+path <- "/home/0/geobrain/GSE63501_16_CTRL_AD/"
 setwd(path)
 smallRNA_files <- dir(path, full.names = TRUE,
                       pattern = "smRNA_gene_expression.xls",

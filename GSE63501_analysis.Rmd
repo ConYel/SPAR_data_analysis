@@ -1,0 +1,142 @@
+---
+title: "R Notebook, analysis of GSE63501"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+## load libraries
+```{r load libraries}
+suppressPackageStartupMessages(library('tidyverse'))
+suppressPackageStartupMessages(library('data.table'))
+```
+## add date
+```{r date_of_analysis}
+date <- gsub(" ","_",format(Sys.time(), "%b %d %Y"))
+```
+## create the dir for the analysis
+```{r}
+dir.create("/home/0/SPAR_data_analysis/GSE63501_analysis")
+dat_path <- "GSE63501_analysis"
+my_exp <- "brain_GSE63501"
+```
+## import data and make dataframe
+```{r create_the_df}
+path <- "/home/0/geobrain/GSE63501_16_CTRL_AD"
+smallRNA_files <- dir(path, full.names = TRUE,
+                      pattern = "smRNA_gene_expression.xls",
+                      recursive = TRUE)
+# load the list of files in one table -----
+DT <- rbindlist(sapply(smallRNA_files,fread,
+                       simplify=FALSE,
+                       #select = c(1,2,4,6),
+                       verbose=getOption("datatable.verbose", TRUE)),
+                use.names= TRUE,idcol="file")  %>%
+  rename(smallRNA = "#Gene")
+
+# sep "smallRNA" column to multiple
+# separate("smallRNA",c("chr","start","end","strand","smallRNA","DQ"), sep = ":") %>%
+#  as_tibble()
+
+# make matrix for DE analysis  -----
+dt <- DT %>% group_by(file) %>% select(-RPM) %>%
+  spread(key = "file", value = "ReadCount" )
+# clean the colnames
+names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>%
+  str_remove(str_glue(".+/GSE63501_16_CTRL_AD/")) %>%
+  str_remove(".trimmed_.+")
+
+# load the targets file ----
+targ_path <- dir(pattern = "tex.xls", recursive = TRUE)
+targ_path <- dir(path = path, 
+                 pattern = "Sra", 
+                 full.names = T,
+                 recursive = TRUE)
+
+targets_file <- fread(targ_path, select = c("Run","classification")) %>%
+  as_tibble() %>% mutate(classification = as_factor(classification))
+
+stopifnot(identical(targets_file$Run,names(dt)[3:length(names(dt))]))
+
+# write the results  -----
+writting_path <- str_glue("{dat_path}/raw_reads_{date}_{my_exp}_SPAR.txt")
+dt %>% write_tsv(writting_path)
+```
+## Perform various Filtering Methods: EdgeR, NOIseq
+```{r}
+suppressPackageStartupMessages(library('edgeR'))
+suppressPackageStartupMessages(library('NOIseq'))# there is a problem loading it 
+# I load it manually 
+suppressPackageStartupMessages(library('rafalib'))
+
+# make the matrix  -----
+mat <- dt %>%
+  select(-GeneClass) %>%
+  column_to_rownames("smallRNA") %>%
+  as.matrix()
+
+# filtering with NOISEq  -----
+noiL <- as.list(1L:3)
+names(noiL) <- c("cpm", "Wilcoxon", "Prop")
+NOISeq_filt <- lapply(noiL, function(x) NOISeq::filtered.data(mat, 
+        factor=targets_file$classification,
+        norm=FALSE, 
+        method=x, cv.cutoff=100, cpm=1))
+
+# create the design matrix  -----
+design <- model.matrix(~targets_file$classification)
+colnames(design) <- gsub("targets_file\\$","",colnames(design))
+rownames(design) <- targets_file$Run
+
+# create the DGElist ----
+targets_file <- targets_file %>% rename(classification = "group")
+dgl <- DGEList(counts = mat,
+               samples = targets_file,
+               lib.size = colSums(mat),
+               norm.factors = rep(1,ncol(mat)))
+
+# filterwith EdgeR ----
+keep.exprs <- filterByExpr.DGEList(dgl, design = design)
+dgl_filt <- dgl[keep.exprs,,keep.lib.sizes=FALSE]
+
+str_glue( "Starting features: {nrow(dgl)}\nedgeR filter, remaining features: {nrow(dgl_filt)}\nCPM approach, remaining features: {nrow(NOISeq_filt[[1]])}\nWilcoxon filter, remaining features: {nrow(NOISeq_filt[[2]])}\nProportion approach filter, remaining features: {nrow(NOISeq_filt[[3]])}")
+
+# if we want to keep noiseq filter instead of edger but use edger object ----
+filte_Nois<- dgl[rownames(dgl$counts) %in% rownames(NOISeq_filt[[3]]),,keep.lib.sizes=FALSE]
+dgl_NOIs<- DGEList(counts = NOISeq_filt[[3]],
+               samples = targets_file,
+               lib.size = colSums(NOISeq_filt[[3]]),
+               norm.factors = rep(1,ncol(NOISeq_filt[[3]])))
+# finally give colours to samples ----
+suppressPackageStartupMessages(library('wesanderson'))
+pal1 <- wes_palette(length(levels(as_factor(targets_file$group))),
+                    name = "Darjeeling1", type = "discrete") %>%
+  enframe(name = NULL) %>%
+  mutate(
+    group = as_factor(levels(targets_file$group)))
+
+# add color to the DGEList 
+dgl_NOIs$colours <- inner_join(dgl_NOIs$samples,pal1,by= "group")$value
+
+
+# plot RLE and other functions from EDASeq
+EDASeq::plotRLE(dgl_NOIs$counts, col=dgl_NOIs$colours, outline=FALSE, las=3, ylab="Relative Log Expression", cex.axis=1, cex.lab=1)
+EDASeq::plotPCA(dgl_NOIs$counts, col=dgl_NOIs$colours, cex=1, cex.axis=1, cex.lab=1)
+
+dataEDA <- EDASeq::newSeqExpressionSet(counts = dgl_NOIs$counts, phenoData =as.data.frame(targets_file,row.names = targets_file$Run))
+EDASeq::meanVarPlot(dataEDA, log=TRUE, ylim=c(0,16))
+EDASeq::biasPlot(dataEDA, "gc", log=TRUE, ylim=c(1,5))
+```
+## proceed with the normalization
+```{r}
+EDASeq::betweenLaneNormalization()
+dataOffset <- EDASeq::betweenLaneNormalization(dataEDA,
+                                       which="upper",offset=TRUE)
+EDASeq::normCounts(dataOffset)
+EDASeq::meanVarPlot(dataOffset, log=TRUE, ylim=c(0,16))
+EDASeq::biasPlot(dataOffset, "gc", log=TRUE, ylim=c(1,5))
+
+```
+
+
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
