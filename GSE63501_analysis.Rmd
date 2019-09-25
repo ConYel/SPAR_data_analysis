@@ -209,7 +209,7 @@ dev.off()
 #x1_voomTMM <- read_rds("~/Documents/new_analysis_workflow/results_R/results_with_DBs/3_IPP_PIWIL1_all_DBs/x1_voomTMM.rds")
 ```
 
-# make h-clustering
+## make h-clustering
 ```{r Hierarchical clustering}
 norm_l <- list(
                "unorm" = cpm(edger_norm[[1]],normalized.lib.sizes = TRUE, log=TRUE, prior.count=5),
@@ -265,4 +265,40 @@ dev.off()
 #       cex = 0.6)
 
 ```
+
+## DE analysis with limma
+```{r}
+# we use voomTMM object
+voomQW_norm %>% names
+
+vfit <- lmFit(voomQW_norm[[2]], design = design)
+vfit <- contrasts.fit(vfit, coefficients = ncol(design))
+efit <- eBayes(vfit,robust = TRUE,trend = TRUE)
+
+results <- decideTests(efit)
+a <- vennCounts(results)
+
+mfrow.old <- par()$mfrow
+par(mfrow=c(1,2))
+vennDiagram(a)
+
+vennDiagram(results, 
+    include=c("up", "down"),
+    counts.col=c("red", "blue"),
+    circle.col = c("red", "blue", "green3"))
+par(mfrow=mfrow.old)
+
+
+#IPP_C_vs_noAb
+topIPP_C_vs_noAb_voom <- topTable(efit,
+                                  coef = 1,
+                             number = nrow(efit),
+                             adjust.method = "fdr",
+                             sort.by = "p") %>% 
+  as_tibble(rownames = "smallRNA") %>% 
+  write_tsv(str_glue("{path}topIPP_C_vs_noAb_voom.txt"))
+
+```
+
+
 The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

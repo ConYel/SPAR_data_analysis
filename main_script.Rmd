@@ -294,6 +294,7 @@ dev.off()
 #       cex = 0.6)
 
 ```
+
 # make MDS plot
 ```{r}
 par(mfrow=c(1,2))
@@ -409,6 +410,33 @@ topres_AD_vs_Control <- topTags(res_AD_vs_Control, n = nrow(res_AD_vs_Control),
   write_tsv(str_glue("{writting_path}res_AD_vs_Ctrl_edger_{date}_{my_exp}.txt"))
 
 # voom   ----
+vfit <- lmFit(x1_voomTMM,design=design)
+vfit <- contrasts.fit(vfit,con_mat)
+vfit <- eBayes(vfit,robust = TRUE,trend = TRUE)
+
+results <- decideTests(vfit)
+a <- vennCounts(results)
+
+mfrow.old <- par()$mfrow
+par(mfrow=c(1,2))
+vennDiagram(a)
+
+vennDiagram(results, 
+    include=c("up", "down"),
+    counts.col=c("red", "blue"),
+    circle.col = c("red", "blue", "green3"))
+par(mfrow=mfrow.old)
+
+
+#IPP_C_vs_noAb
+topIPP_C_vs_noAb_voom <- topTable(vfit,coef = "IPP_C_vs_noAb",
+                             number = nrow(vfit),
+                             adjust.method = "fdr",
+                             sort.by = "p") %>% 
+  as_tibble(rownames = "smallRNA") %>% 
+  write_tsv(str_glue("{path}topIPP_C_vs_noAb_voom.txt"))
+
+
 ```
 
 
