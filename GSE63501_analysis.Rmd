@@ -101,7 +101,8 @@ dgl_filt <- dgl[keep.exprs,,keep.lib.sizes=FALSE]
 str_glue( "Starting features: {nrow(dgl)}\nedgeR filter, remaining features: {nrow(dgl_filt)}\nCPM approach, remaining features: {nrow(NOISeq_filt[[1]])}\nWilcoxon filter, remaining features: {nrow(NOISeq_filt[[2]])}\nProportion approach filter, remaining features: {nrow(NOISeq_filt[[3]])}")
 
 # if we want to keep noiseq filter instead of edger but use edger object ----
-filte_Nois<- dgl[rownames(dgl$counts) %in% rownames(NOISeq_filt[[3]]),,keep.lib.sizes=FALSE]
+filte_Nois <- dgl[rownames(dgl$counts) %in% rownames(NOISeq_filt[[3]]),,keep.lib.sizes=FALSE]
+
 dgl_NOIs<- DGEList(counts = NOISeq_filt[[3]],
                samples = targets_file,
                lib.size = colSums(NOISeq_filt[[3]]),
@@ -119,10 +120,14 @@ dgl_NOIs$colours <- inner_join(dgl_NOIs$samples,pal1,by= "group")$value
 
 
 # plot RLE and other functions from EDASeq ----
-EDASeq::plotRLE(dgl_NOIs$counts, col=dgl_NOIs$colours, outline=FALSE, las=3, ylab="Relative Log Expression", cex.axis=1, cex.lab=1)
-EDASeq::plotPCA(dgl_NOIs$counts, col=dgl_NOIs$colours, cex=1, cex.axis=1, cex.lab=1)
+suppressPackageStartupMessages(library('EDASeq'))
+EDASeq::plotRLE(dgl_NOIs$counts, col=dgl_NOIs$colours, 
+                outline=FALSE, las=3, ylab="Relative Log Expression", 
+                cex.axis=1, cex.lab=1)
+EDASeq::plotPCA(dgl_NOIs$counts, 
+                col=dgl_NOIs$colours, cex=1, cex.axis=1, cex.lab=1)
 
-dataEDA <- EDASeq::newSeqExpressionSet(counts = dgl_NOIs$counts, phenoData =as.data.frame(targets_file,row.names = targets_file$Run))
+dataEDA <- EDASeq::newSeqExpressionSet(counts = dgl_NOIs$counts, phenoData = as.data.frame(targets_file,row.names = targets_file$Run))
 EDASeq::meanVarPlot(dataEDA, log=TRUE, ylim=c(0,16))
 EDASeq::biasPlot(dataEDA, "gc", log=TRUE, ylim=c(1,5))
 ```
@@ -141,68 +146,123 @@ dev.off()
 
 ## proceed with the normalization
 ```{r}
+# not normalized
+cpm_unorm <- cpm(dgl_NOIs,log=F,prior.count=5)
+lcpm_unorm <- cpm(dgl_NOIs,log=TRUE,prior.count=5)
 # EDA norm ----
-EDASeq::betweenLaneNormalization()
-dataOffset <- EDASeq::betweenLaneNormalization(dataEDA,
+dataOffset <- betweenLaneNormalization(dataEDA,
                                        which="upper",offset=TRUE)
-EDASeq::normCounts(dataOffset)
+
 EDASeq::meanVarPlot(dataOffset, log=TRUE, ylim=c(0,16))
+# edgeR  ----
+norm_method <- list("none" = "none", 
+                  "TMM" = "TMM",
+                  "TMMwsp" = "TMMwsp",
+                  "RLE" = "RLE" )
+edger_norm <- lapply(norm_method, function(x){
+  calcNormFactors(dgl_NOIs, method = x)
+})
 
-# edgeR TMM ----
-x1_TMM <- calcNormFactors(dgl_NOIs, method = "TMM")
+#x1_TMM <- calcNormFactors(dgl_NOIs, method = "TMM")
+#cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE)
+#lcpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, log=TRUE, prior.count=5)
 
-cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE)
-EDASeq::plotRLE(cpm_TMM, col=dgl_NOIs$colours, outline=FALSE, las=3, ylab="Relative Log Expression", cex.axis=1, cex.lab=1)
-lcpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, log=TRUE, prior.count=5)
+# voom with quality weights ----
+voomQW_norm <- mapply(function(x, i)
+  voomWithQualityWeights(x, design = design, plot = TRUE, 
+                         normalize.method = i), edger_norm[1:3], 
+  c("quantile", rep("none",2)), SIMPLIFY = FALSE 
+)
+# create list of normalized data ------
 
-x1_voomTMM <- voomWithQualityWeights(x1_TMM,design = design,plot = TRUE)
+norm_list <- list("Not normalized" = cpm(edger_norm[[1]],normalized.lib.sizes = TRUE), 
+                  "EDA_upperQ" = dataOffset, 
+                  "TMM" = cpm(edger_norm[[2]],normalized.lib.sizes = TRUE),
+                  "TMMwsp" = cpm(edger_norm[[3]],normalized.lib.sizes = TRUE), 
+                  "RLE"  = cpm(edger_norm[[4]],normalized.lib.sizes = TRUE),
+                  "voom_Quantile" = 2^voomQW_norm[[1]]$E,
+                  "voom_TMM" = 2^voomQW_norm[[2]]$E,
+                  "voom_TMMwsp" = 2^voomQW_norm[[3]]$E)
 
-EDASeq::plotRLE(x1_voomTMM$E, col=dgl_NOIs$colours, outline=FALSE, las=3, ylab="Relative Log Expression", cex.axis=1, cex.lab=1)
+pdf(str_glue("{dat_path}/RLE_plots_{date}_{my_exp}.pdf"))
 
-x1_voomQ <- voomWithQualityWeights(dgl_NOIs,design = design,normalize.method = "quantile",plot = TRUE)
+sapply(seq_along(norm_list) ,function(x, n, i){ 
+       EDASeq::plotRLE(x[[i]], col=dgl_NOIs$colours,
+                       outline=FALSE, las=3, 
+                       ylab="Relative Log Expression", 
+                       cex.axis=1, cex.lab=1, main = str_glue("{n[[i]]}"));
+  legend("topright",
+       legend= levels(as_factor(dgl_NOIs$samples$group)),
+       fill = levels(as_factor(dgl_NOIs$colours)),
+       bty="n",
+       cex = 1.5, inset = c(.01,.01) )}, x = norm_list, n = names(norm_list))
+dev.off()
 
 
+#cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, prior.count=5)
 
-EDASeq::plotPCA(cpm_TMM, col=dgl_NOIs$colours, cex=1, cex.axis=1, cex.lab=1)
-```
-
-# normalization
-```{r normalization and boxplot}
-x1_TMM <- calcNormFactors(x1, method = "TMM")
-x1_TMMwsp <- calcNormFactors(x1, method = "TMMwsp")
-x1_voomTMM <- voomWithQualityWeights(x1_TMM,design = design,plot = TRUE)
-x1_voomQ <- voomWithQualityWeights(x1,design = design,normalize.method = "quantile",plot = TRUE)
-
-lcpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, log=TRUE, prior.count=5)
-lcpm_TMMwsp <- cpm(x1_TMMwsp,normalized.lib.sizes = TRUE, log=TRUE, prior.count=5)
-
-cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE)
-cpm_TMMwsp <- cpm(x1_TMMwsp,normalized.lib.sizes = TRUE)
+#EDASeq::plotRLE(cpm_TMM, col=dgl_NOIs$colours, 
+#                outline=FALSE, las=3, ylab="Relative Log Expression", 
+#                cex.axis=1, cex.lab=1, main = "TMM")
 
 #write_rds(x1_TMM,str_glue("x1_TMMwzp_{experiment}_{date}.rds"))
 #x1_voomTMM <- read_rds("~/Documents/new_analysis_workflow/results_R/results_with_DBs/3_IPP_PIWIL1_all_DBs/x1_voomTMM.rds")
-par(mar=c(9,5,1,1))
-par(mfrow= c(1,1))
-#raw data
-lcpm <- cpm(x1,log=TRUE,prior.count=5)
-
-pdf(str_glue("{writting_path}boxplot_TMM_{date}_{my_exp}.pdf"))
-
-boxplot(lcpm, las= 2, col= x1$colours, main="", names=group)
-title(main="A. Not Normalized filtered data",ylab="Log-cpm")
-#TMM data
-boxplot(lcpm_TMM, las=2, col= x1$colours, main="",names=group)
-title(main="A. TMM Normalized filtered data",ylab="Log-cpm")
-#TMMwsp data
-boxplot(lcpm_TMMwsp, las=2, col= x1$colours, main="",names=group)
-title(main="A. TMMwsp Normalized filtered data",ylab="Log-cpm")
-#x1_voomTMM data
-boxplot(x1_voomTMM$E, las=2, col= x1$colours, main="",names=group)
-title(main="A. voomTMM Normalized filtered data",ylab="Log-cpm")
-#x1_voomQ data
-boxplot(x1_voomQ$E, las=2, col= x1$colours, main="",names=group)
-title(main="A. voomQ Normalized filtered data",ylab="Log-cpm")
-dev.off()
 ```
 
+# make h-clustering
+```{r Hierarchical clustering}
+norm_l <- list(
+               "unorm" = cpm(edger_norm[[1]],normalized.lib.sizes = TRUE, log=TRUE, prior.count=5),
+               "TMM" = cpm(edger_norm[[2]],normalized.lib.sizes = TRUE, log=TRUE, prior.count=5),
+               "TMMwsp" = cpm(edger_norm[[3]],normalized.lib.sizes = TRUE, log=TRUE, prior.count=5),
+               "voomQ_QW" = voomQW_norm[[1]]$E,
+               "voomTMM_QW" = voomQW_norm[[2]]$E,
+               "voomTMM_QW" = voomQW_norm[[3]]$E)
+
+hc_methods <- c("ward.D2",
+                "single",
+                "complete",
+                "average",
+                #"median", "centroid",
+                "mcquitty")
+l_d <- lapply(norm_l,function(x)dist(t(x)))
+
+l_hc <- sapply(hc_methods, function(x) lapply(l_d, function(y) hclust(y,method = x)))
+
+names(l_hc) <- rep(rownames(l_hc),times = ncol(l_hc))
+
+pdf(str_glue("{dat_path}/hierarchic_clust_{date}_{my_exp}.pdf"))
+for (i in seq_along(l_hc)) {
+  myplclust(l_hc[[i]],
+            lab.col = dgl_NOIs$colours, #x1$colours,pal1$value
+            labels = dgl_NOIs$samples$group,#pal1$group
+       xlab = str_glue("{names(l_hc[i])}"),
+       main = str_glue("{enframe(l_hc[[i]])$value[7]} - {enframe(l_hc[[i]])$value[5]} - group"))
+  legend("topright",
+       legend = levels(as_factor(dgl_NOIs$samples$group)),
+       fill = levels(as_factor(dgl_NOIs$colours)), #x1$colours  
+       bty="n",
+       cex = 0.9)
+}
+
+#sapply(l_hc,function(x)myplclust(x,lab.col = x1$colours,labels = x1_TMM$samples$group,
+#       xlab = str_glue("{names(x)}"), main = str_glue("{enframe(x)$value[7]} - {enframe(x)$value[5]} - region")))
+
+dev.off()
+
+#d <- dist(t(lcpm_TMM))
+#par(mar=c(7,3,2,2))
+#myplclust(hc,lab.col = x1$colours,labels = x1_TMM$samples$group,
+#          xlab = "",main="euclidean-ward.D2 - region")
+#myplclust(hc,lab.col = x1$colours,labels = targets_file$Years,
+#          xlab = "",main="euclidean-ward.D2 - age")
+#myplclust(hc,lab.col = x1$colours,labels = targets_file$data_sequenziamento,
+#          xlab = "",main="euclidean-ward.D2 - year of run")
+
+#legend("topright",legend = levels(group),
+#       fill = x1$colours,
+#       bty="n",
+#       cex = 0.6)
+
+```
 The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
