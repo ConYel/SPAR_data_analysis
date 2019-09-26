@@ -1,6 +1,7 @@
 ---
 title: "R Notebook, analysis of GSE63501"
 output: html_notebook
+date: "`r format(Sys.time(), '%a_%b_%d_%Y')`"
 editor_options: 
   chunk_output_type: console
 ---
@@ -11,7 +12,7 @@ suppressPackageStartupMessages(library('data.table'))
 ```
 ## add date
 ```{r date_of_analysis}
-date <- gsub(" ","_",format(Sys.time(), "%b %d %Y"))
+date <- format(Sys.time(), "%d_%b_%Y")
 ```
 ## create the dir for the analysis
 ```{r}

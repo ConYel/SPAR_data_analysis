@@ -1,7 +1,7 @@
 ---
 title: "Main_Data_Analysis"
 author: "Constantinos Yeles"
-date: "10/07/2019"
+date: "`r format(Sys.time(), '%a_%b_%d_%Y')`"
 output:
   pdf_document: default
   html_document: default
