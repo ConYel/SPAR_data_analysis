@@ -16,9 +16,10 @@ date <- format(Sys.time(), "%d_%b_%Y")
 ```
 ## create the dir for the analysis
 ```{r}
-dir.create("/home/0/SPAR_data_analysis/GSE63501_analysis")
-dat_path <- "GSE63501_analysis"
 my_exp <- "brain_GSE63501"
+dir.create(str_glue("/home/0/SPAR_data_analysis/{my_exp}_analysis"))
+dat_path <- str_glue("{my_exp}_analysis")
+
 ```
 ## import data and make dataframe
 ```{r create_the_df}
