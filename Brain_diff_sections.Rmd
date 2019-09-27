@@ -65,9 +65,9 @@ targets_file <- fread(targ_path) %>%
 targets_file <- targets_file %>% 
   filter(Tissue == "Brain",
          Dev_stage == "Adult") %>% 
-  select(samples, Sample_id, Date_of_seq, Total_region,
-         Reads, Sex, Age, Donors) %>% 
-  mutate_if(is.character, as_factor)
+  dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
+         Reads, Sex, Age, Single_pool) %>% 
+  mutate_if(is.character, as_factor) 
 
 target <- match(names(dt),targets_file$Sample_id, nomatch = 0)
 tardt <- match(targets_file$Sample_id, names(dt), nomatch = 0)
@@ -108,12 +108,23 @@ NOISeq_filt <- lapply(noiL, function(x) NOISeq::filtered.data(mat,
         method = x, cv.cutoff=100, cpm=1))
 
 # create the design matrix  -----
-design <- model.matrix(~targets_file$Total_region)
-colnames(design) <- gsub("targets_file\\$Total_region","",colnames(design))
-rownames(design) <- targets_file$Total_region
+targets_file <- targets_file %>% dplyr::rename(group = "Total_region")
+design <- model.matrix(~targets_file$group)
+colnames(design) <- gsub("targets_file\\$group","",colnames(design))
+rownames(design) <- targets_file$group
+# another design considering batch ----
+design <- model.matrix(~0 + targets_file$group + 
+                         targets_file$Date_of_seq)
+
+colnames(design) <- colnames(design) %>% 
+  str_remove("targets_file\\$group") %>% 
+  str_remove("targets_file\\$Date_of_seq") 
+  str_remove("targets_file\\$Sex") %>% 
+  str_remove("targets_file\\$Donors")
+rownames(design) <- targets_file$group
 
 # create the DGElist ----
-targets_file <- targets_file %>% dplyr::rename(group = "Total_region")
+
 dgl <- DGEList(counts = mat,
                samples = targets_file,
                lib.size = colSums(mat),
@@ -123,6 +134,7 @@ dgl <- DGEList(counts = mat,
 keep.exprs <- filterByExpr.DGEList(dgl, design = design)
 dgl_filt <- dgl[keep.exprs,,keep.lib.sizes=FALSE]
 
+dim(dgl);dim(dgl_filt)
 str_glue( "Starting features: {nrow(dgl)}\nedgeR filter, remaining features: {nrow(dgl_filt)}\nCPM approach, remaining features: {nrow(NOISeq_filt[[1]])}\nWilcoxon filter, remaining features: {nrow(NOISeq_filt[[2]])}\nProportion approach filter, remaining features: {nrow(NOISeq_filt[[3]])}")
 
 # if we want to keep noiseq filter instead of edger but use edger object ----
@@ -296,8 +308,13 @@ dev.off()
 ```{r}
 suppressPackageStartupMessages(library('sva'))
 # full model
-mod <-  model.matrix(~dgl_filt$samples$group, data = dgl_filt$samples)
-colnames(mod) <- gsub("dgl_filt\\$samples\\$group","",colnames(mod))
+mod <-  model.matrix(~dgl_filt$samples$group+dgl_filt$samples$Date_of_seq,
+                     data = dgl_filt$samples)
+colnames(mod) <- colnames(mod) %>% 
+  str_remove("dgl_filt\\$samples\\$group") %>% 
+  str_remove("dgl_filt\\$samples\\$Date_of_seq") 
+  str_remove("targets_file\\$Sex") %>% 
+  str_remove("targets_file\\$Donors")
 
 # null model
 mod0 <- cbind(mod[,1])
@@ -309,10 +326,40 @@ plot(svseq$sv, pch=19, col="blue")
 n.sv <- num.sv(voomQW_norm[[1]]$E, mod, method = "leek")
 svobj <- sva(voomQW_norm[[1]]$E, mod, mod0,n.sv = n.sv)
 
-
-
 modSv <- cbind(mod,svobj$sv)
 fit = lmFit(voomQW_norm[[1]],modSv)
+
+# combat
+norm_l[["TMM"]]
+modcombat <-  model.matrix(~1, data=dgl_filt$samples)
+combat_edata <- ComBat(norm_l[["TMM"]], batch = dgl_filt$samples$Date_of_seq,
+                       mod = modcombat, par.prior = TRUE,
+                       prior.plots = FALSE,
+  mean.only = FALSE, ref.batch = NULL, BPPARAM = bpparam("SerialParam"))
+pValuesComBat = f.pvalue(combat_edata,mod,mod0)
+qValuesComBat = p.adjust(pValuesComBat,method="BH")
+
+#limma remove batch effect
+norm_l[["TMM"]] %>% plotMDS
+logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$Date_of_seq)
+  plotMDS(logCPM,
+  labels = targets_file$samples,
+                col = dgl_filt$colours,dim.plot = c(3,4))
+  
+  d <- dist(t(logCPM))
+ hc <- hclust(d,method = "ward.D2")
+ myplclust(hc,
+            lab.col = dgl_filt$colours, #x1$colours,pal1$value
+            labels = dgl_filt$samples$group)#pal1$group
+      # xlab = str_glue("{names(l_hc[i])}"),
+      # main = str_glue("{enframe(l_hc[[i]])$value[7]} - {enframe(l_hc[[i]])$value[5]} - group"))
+  legend("topright",
+       legend = levels(as_factor(dgl_filt$samples$group)),
+       fill = levels(as_factor(dgl_filt$colours)), #x1$colours  
+       bty="n",
+       cex = 0.9)
+
+  
 ```
 
 
