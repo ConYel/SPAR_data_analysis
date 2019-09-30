@@ -1,8 +1,12 @@
 ---
-title: "R Notebook, analysis of GSE63501"
-output: html_notebook
+title: "R Notebook, analysis of brain samples, different sections"
+author: "Constantinos Yeles"
 date: "`r format(Sys.time(), '%a_%b_%d_%Y')`"
-editor_options: 
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+editor_options:
   chunk_output_type: console
 ---
 ## load libraries
@@ -16,14 +20,14 @@ date <- format(Sys.time(), "%d_%b_%Y")
 ```
 ## create the dir for the analysis
 ```{r}
-my_exp <- "brain_GSE63501"
+my_exp <- "brain_diff_sect"
 dir.create(str_glue("/home/0/SPAR_data_analysis/{my_exp}_analysis"))
 dat_path <- str_glue("{my_exp}_analysis")
-
 ```
+
 ## import data and make dataframe
 ```{r create_the_df}
-path <- "/home/0/geobrain/GSE63501_16_CTRL_AD"
+path <- "/home/0/my_data/SPAR_res"
 smallRNA_files <- dir(path, full.names = TRUE,
                       pattern = "smRNA_gene_expression.xls",
                       recursive = TRUE)
@@ -44,25 +48,44 @@ dt <- DT %>% group_by(file) %>% select(-RPM) %>%
   spread(key = "file", value = "ReadCount" )
 # clean the colnames
 names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>%
-  str_remove(str_glue(".+/GSE63501_16_CTRL_AD/")) %>%
-  str_remove(".trimmed_.+")
+  str_remove(".+/SPAR_res/") %>%
+  str_remove(".trimmed_.+") %>%
+  str_replace("^?","S")
 
 # load the targets file ----
-targ_path <- dir(pattern = "tex.xls", recursive = TRUE)
 targ_path <- dir(path = path, 
-                 pattern = "Sra", 
+                 pattern = "targets.+.csv",
                  full.names = T,
                  recursive = TRUE)
 
-targets_file <- fread(targ_path, select = c("Run","classification")) %>%
-  as_tibble() %>% mutate(classification = as_factor(classification))
+targets_file <- fread(targ_path) %>%
+  as_tibble() %>% 
+  mutate(Sample_id = str_replace(Sample_id,"^?","S"))
 
-stopifnot(identical(targets_file$Run,names(dt)[3:length(names(dt))]))
+targets_file <- targets_file %>% 
+  filter(Tissue == "Brain",
+         Dev_stage == "Adult",
+         !Single_pool == "Single",
+         !is.na(Sample_id)) %>% 
+  dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
+         Reads, Sex, Age, Single_pool) %>% 
+  mutate_if(is.character, as_factor) 
+  
+
+target <- match(names(dt),targets_file$Sample_id, nomatch = 0)
+tardt <- match(targets_file$Sample_id, names(dt), nomatch = 0)
+#dt1 <- dt
+names(dt)[tardt] <- as.character(targets_file$samples[target])
+
+#tibble(names(dt)[3:length(names(dt))],targets_file$Sample_id)
+#tibble(names(dt1), names(dt))
+
+stopifnot(identical(targets_file$Sample_id,names(dt)[3:length(names(dt))]))
 
 # write the results  -----
-writting_path <- str_glue("{dat_path}/raw_reads_{date}_{my_exp}_SPAR.txt")
-dt %>% write_tsv(writting_path)
+dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{date}_{my_exp}_SPAR.txt"))
 ```
+
 ## Perform various Filtering Methods: EdgeR, NOIseq
 ```{r}
 suppressPackageStartupMessages(library('edgeR'))
@@ -70,6 +93,9 @@ suppressPackageStartupMessages(library('NOIseq'))# there is a problem loading it
 # I load it manually 
 suppressPackageStartupMessages(library('rafalib'))
 
+#subset the dataset
+dt <- dt[c(1,2, tardt)]
+targets_file <- targets_file %>% filter(Sample_id %in% colnames(dt))
 # make the matrix  -----
 mat <- dt %>%
   select(-GeneClass) %>%
@@ -80,17 +106,28 @@ mat <- dt %>%
 noiL <- as.list(1L:3)
 names(noiL) <- c("cpm", "Wilcoxon", "Prop")
 NOISeq_filt <- lapply(noiL, function(x) NOISeq::filtered.data(mat, 
-        factor=targets_file$classification,
-        norm=FALSE, 
-        method=x, cv.cutoff=100, cpm=1))
+        factor = targets_file$Total_region,
+        norm = FALSE, 
+        method = x, cv.cutoff=100, cpm=1))
 
 # create the design matrix  -----
-design <- model.matrix(~targets_file$classification)
-colnames(design) <- gsub("targets_file\\$","",colnames(design))
-rownames(design) <- targets_file$Run
+targets_file <- targets_file %>% dplyr::rename(group = "Total_region")
+design <- model.matrix(~targets_file$group)
+colnames(design) <- gsub("targets_file\\$group","",colnames(design))
+rownames(design) <- targets_file$group
+# another design considering batch ----
+design <- model.matrix(~0 + targets_file$group + 
+                         targets_file$Date_of_seq)
+
+colnames(design) <- colnames(design) %>% 
+  str_remove("targets_file\\$group") %>% 
+  str_remove("targets_file\\$Date_of_seq") 
+  str_remove("targets_file\\$Sex") %>% 
+  str_remove("targets_file\\$Donors")
+rownames(design) <- targets_file$group
 
 # create the DGElist ----
-targets_file <- targets_file %>% rename(classification = "group")
+
 dgl <- DGEList(counts = mat,
                samples = targets_file,
                lib.size = colSums(mat),
@@ -100,43 +137,45 @@ dgl <- DGEList(counts = mat,
 keep.exprs <- filterByExpr.DGEList(dgl, design = design)
 dgl_filt <- dgl[keep.exprs,,keep.lib.sizes=FALSE]
 
+dim(dgl);dim(dgl_filt)
 str_glue( "Starting features: {nrow(dgl)}\nedgeR filter, remaining features: {nrow(dgl_filt)}\nCPM approach, remaining features: {nrow(NOISeq_filt[[1]])}\nWilcoxon filter, remaining features: {nrow(NOISeq_filt[[2]])}\nProportion approach filter, remaining features: {nrow(NOISeq_filt[[3]])}")
 
 # if we want to keep noiseq filter instead of edger but use edger object ----
-filte_Nois <- dgl[rownames(dgl$counts) %in% rownames(NOISeq_filt[[3]]),,keep.lib.sizes=FALSE]
+filte_Nois <- dgl[rownames(dgl$counts) %in% rownames(NOISeq_filt[[i]]),,keep.lib.sizes=FALSE]
 
-dgl_NOIs<- DGEList(counts = NOISeq_filt[[3]],
+dgl_filt <- DGEList(counts = NOISeq_filt[[i]],
                samples = targets_file,
-               lib.size = colSums(NOISeq_filt[[3]]),
-               norm.factors = rep(1,ncol(NOISeq_filt[[3]])))
+               lib.size = colSums(NOISeq_filt[[i]]),
+               norm.factors = rep(1,ncol(NOISeq_filt[[i]])))
 # finally give colours to samples ----
 suppressPackageStartupMessages(library('wesanderson'))
 pal1 <- wes_palette(length(levels(as_factor(targets_file$group))),
-                    name = "Darjeeling1", type = "discrete") %>%
+                    name = "Darjeeling1", type = "continuous") %>%
   enframe(name = NULL) %>%
   mutate(
     group = as_factor(levels(targets_file$group)))
 
 # add color to the DGEList 
-dgl_NOIs$colours <- inner_join(dgl_NOIs$samples,pal1,by= "group")$value
+dgl_filt$colours <- inner_join(dgl_filt$samples,pal1,by= "group")$value
 
 
 # plot RLE and other functions from EDASeq ----
 suppressPackageStartupMessages(library('EDASeq'))
-EDASeq::plotRLE(dgl_NOIs$counts, col=dgl_NOIs$colours, 
+EDASeq::plotRLE(dgl_filt$counts, col=dgl_filt$colours, 
                 outline=FALSE, las=3, ylab="Relative Log Expression", 
                 cex.axis=1, cex.lab=1)
-EDASeq::plotPCA(dgl_NOIs$counts, 
-                col=dgl_NOIs$colours, cex=1, cex.axis=1, cex.lab=1)
+EDASeq::plotPCA(dgl_filt$counts, 
+                col = dgl_filt$colours, cex=1, cex.axis=1, cex.lab=1)
 
-dataEDA <- EDASeq::newSeqExpressionSet(counts = dgl_NOIs$counts, phenoData = as.data.frame(targets_file,row.names = targets_file$Run))
+dataEDA <- EDASeq::newSeqExpressionSet(counts = dgl_filt$counts, 
+  phenoData = as.data.frame(dgl_filt$samples, row.names = rownames(dgl_filt$samples)))
 EDASeq::meanVarPlot(dataEDA, log=TRUE, ylim=c(0,16))
 EDASeq::biasPlot(dataEDA, "gc", log=TRUE, ylim=c(1,5))
 ```
 ## histogram
 ```{r}
 AveLogCpm_Raw_Data <- aveLogCPM(dgl)
-AveLogCpm_Filtered_Data <-aveLogCPM(dgl_NOIs)
+AveLogCpm_Filtered_Data <-aveLogCPM(dgl_filt)
 
 par(mfrow=c(1,2))
 
@@ -149,8 +188,8 @@ dev.off()
 ## proceed with the normalization
 ```{r}
 # not normalized
-cpm_unorm <- cpm(dgl_NOIs,log=F,prior.count=5)
-lcpm_unorm <- cpm(dgl_NOIs,log=TRUE,prior.count=5)
+cpm_unorm <- cpm(dgl_filt,log=F,prior.count=5)
+lcpm_unorm <- cpm(dgl_filt,log=TRUE,prior.count=5)
 # EDA norm ----
 dataOffset <- betweenLaneNormalization(dataEDA,
                                        which="upper",offset=TRUE)
@@ -162,10 +201,10 @@ norm_method <- list("none" = "none",
                   "TMMwsp" = "TMMwsp",
                   "RLE" = "RLE" )
 edger_norm <- lapply(norm_method, function(x){
-  calcNormFactors(dgl_NOIs, method = x)
+  calcNormFactors(dgl_filt, method = x)
 })
 
-#x1_TMM <- calcNormFactors(dgl_NOIs, method = "TMM")
+#x1_TMM <- calcNormFactors(dgl_filt, method = "TMM")
 #cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE)
 #lcpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, log=TRUE, prior.count=5)
 
@@ -189,21 +228,21 @@ norm_list <- list("Not normalized" = cpm(edger_norm[[1]],normalized.lib.sizes = 
 pdf(str_glue("{dat_path}/RLE_plots_{date}_{my_exp}.pdf"))
 
 sapply(seq_along(norm_list) ,function(x, n, i){ 
-       EDASeq::plotRLE(x[[i]], col=dgl_NOIs$colours,
+       EDASeq::plotRLE(x[[i]], col=dgl_filt$colours,
                        outline=FALSE, las=3, 
                        ylab="Relative Log Expression", 
                        cex.axis=1, cex.lab=1, main = str_glue("{n[[i]]}"));
   legend("topright",
-       legend= levels(as_factor(dgl_NOIs$samples$group)),
-       fill = levels(as_factor(dgl_NOIs$colours)),
+       legend= levels(as_factor(dgl_filt$samples$group)),
+       fill = levels(as_factor(dgl_filt$colours)),
        bty="n",
-       cex = 1.5, inset = c(.01,.01) )}, x = norm_list, n = names(norm_list))
+       cex = 0.5, inset = c(.01,.01) )}, x = norm_list, n = names(norm_list))
 dev.off()
 
 
 #cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, prior.count=5)
 
-#EDASeq::plotRLE(cpm_TMM, col=dgl_NOIs$colours, 
+#EDASeq::plotRLE(cpm_TMM, col=dgl_filt$colours, 
 #                outline=FALSE, las=3, ylab="Relative Log Expression", 
 #                cex.axis=1, cex.lab=1, main = "TMM")
 
@@ -236,13 +275,13 @@ names(l_hc) <- rep(rownames(l_hc),times = ncol(l_hc))
 pdf(str_glue("{dat_path}/hierarchic_clust_{date}_{my_exp}.pdf"))
 for (i in seq_along(l_hc)) {
   myplclust(l_hc[[i]],
-            lab.col = dgl_NOIs$colours, #x1$colours,pal1$value
-            labels = dgl_NOIs$samples$group,#pal1$group
+            lab.col = dgl_filt$colours, #x1$colours,pal1$value
+            labels = dgl_filt$samples$group,#pal1$group
        xlab = str_glue("{names(l_hc[i])}"),
        main = str_glue("{enframe(l_hc[[i]])$value[7]} - {enframe(l_hc[[i]])$value[5]} - group"))
   legend("topright",
-       legend = levels(as_factor(dgl_NOIs$samples$group)),
-       fill = levels(as_factor(dgl_NOIs$colours)), #x1$colours  
+       legend = levels(as_factor(dgl_filt$samples$group)),
+       fill = levels(as_factor(dgl_filt$colours)), #x1$colours  
        bty="n",
        cex = 0.9)
 }
@@ -268,37 +307,101 @@ dev.off()
 
 ```
 
-## DE analysis with limma
+## remove unwanted variation
 ```{r}
-# we use voomTMM object
-voomQW_norm %>% names
+suppressPackageStartupMessages(library('sva'))
+# full model
+mod <-  model.matrix(~dgl_filt$samples$group+dgl_filt$samples$Date_of_seq,
+                     data = dgl_filt$samples)
+colnames(mod) <- colnames(mod) %>% 
+  str_remove("dgl_filt\\$samples\\$group") %>% 
+  str_remove("dgl_filt\\$samples\\$Date_of_seq") 
+  str_remove("targets_file\\$Sex") %>% 
+  str_remove("targets_file\\$Donors")
 
-vfit <- lmFit(voomQW_norm[[2]], design = design)
-vfit <- contrasts.fit(vfit, coefficients = ncol(design))
-efit <- eBayes(vfit,robust = TRUE,trend = TRUE)
+# null model
+mod0 <- cbind(mod[,1])
 
-results <- decideTests(efit)
-a <- vennCounts(results)
+# estimate batch and other artifacts
+svseq <- svaseq(dgl_filt$counts, mod, mod0, n.sv = 1)
+plot(svseq$sv, pch=19, col="blue")
 
-mfrow.old <- par()$mfrow
-par(mfrow=c(1,2))
-vennDiagram(a)
+n.sv <- num.sv(voomQW_norm[[1]]$E, mod, method = "leek")
+svobj <- sva(voomQW_norm[[1]]$E, mod, mod0,n.sv = n.sv)
 
-vennDiagram(results, 
-    include=c("up", "down"),
-    counts.col=c("red", "blue"),
-    circle.col = c("red", "blue", "green3"))
-par(mfrow=mfrow.old)
+modSv <- cbind(mod,svobj$sv)
+fit = lmFit(voomQW_norm[[1]],modSv)
+
+# combat
+norm_l[["TMM"]]
+modcombat <-  model.matrix(~1, data=dgl_filt$samples)
+combat_edata <- ComBat(norm_l[["TMM"]], batch = dgl_filt$samples$Date_of_seq,
+                       mod = modcombat, par.prior = TRUE,
+                       prior.plots = FALSE,
+  mean.only = FALSE, ref.batch = NULL, BPPARAM = bpparam("SerialParam"))
+pValuesComBat = f.pvalue(combat_edata,mod,mod0)
+qValuesComBat = p.adjust(pValuesComBat,method="BH")
+
+#limma remove batch effect
+norm_l[["TMM"]] %>% plotMDS(labels = dgl_filt$samples$group, col = dgl_filt$colours)
+logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$Date_of_seq)
+  plotMDS(logCPM,
+  labels = dgl_filt$samples$group,
+                col = dgl_filt$colours,dim.plot = c(3,4))
+
+ d <- dist(t(logCPM))
+ hc <- hclust(d,method = "ward.D2")
+ myplclust(hc,
+            lab.col = dgl_filt$colours, #x1$colours,pal1$value
+            labels = dgl_filt$samples$group)#pal1$group
+      # xlab = str_glue("{names(l_hc[i])}"),
+      # main = str_glue("{enframe(l_hc[[i]])$value[7]} - {enframe(l_hc[[i]])$value[5]} - group"))
+  legend("topright",
+       legend = levels(as_factor(dgl_filt$samples$group)),
+       fill = levels(as_factor(dgl_filt$colours)), #x1$colours  
+       bty="n",
+       cex = 0.9)
 
 
-#IPP_C_vs_noAb
-topIPP_C_vs_noAb_voom <- topTable(efit,
-                                  coef = 1,
-                             number = nrow(efit),
-                             adjust.method = "fdr",
-                             sort.by = "p") %>% 
-  as_tibble(rownames = "smallRNA") %>% 
-  write_tsv(str_glue("{path}topIPP_C_vs_noAb_voom.txt"))
+# make heatmap -----
+suppressPackageStartupMessages(library(ComplexHeatmap))
+suppressPackageStartupMessages(library(circlize))
+
+logCPM <- logCPM[str_detect(rownames(logCPM), "piR"),]
+filter = apply(logCPM, 1, function(x) length(x[x > 0 ]) > 5)
+logCPM_fil <- logCPM[filter, ]
+scaled_mat <- t(scale(t(as.matrix(logCPM_fil))))
+
+
+scaled_mat <- t(scale(t(as.matrix(logCPM))))
+hist(scaled_mat)
+df <- dgl_filt$samples %>% 
+  select(group, Date_of_seq, Sex, Age)
+
+data.frame(Brain_partition = dgl_filt$samples$group,
+                 Date_of_seq)  
+
+
+ha <- HeatmapAnnotation(df = df)
+f <- colorRamp2(c(-2,median(scaled_mat),2),c("blue","white","yellow"))
+
+# plot Heatmap
+# cluster rows and columns
+pdf(str_glue("{dat_path}/Heatmap_{date}_{my_exp}.pdf"))
+Heatmap(scaled_mat,
+        top_annotation = ha,
+        col=f,
+        show_row_dend = TRUE,
+        clustering_distance_rows = "spearman",
+        clustering_method_rows="ward.D2",
+        clustering_distance_columns = "spearman",
+        clustering_method_columns ="ward.D2",
+        show_row_names = FALSE,show_column_names = F,
+        name= "z-score equivalent", 
+        column_title = str_glue("Heatmap of {nrow(scaled_mat)} piRNAs"),
+        column_title_side="top")  
+dev.off()
+
 
 ```
 
