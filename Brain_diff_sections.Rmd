@@ -72,6 +72,19 @@ targets_file <- targets_file %>%
   mutate_if(is.character, as_factor) 
   
 
+targets_file <- targets_file %>% 
+  filter(Dev_stage == "Adult",
+         !Single_pool == "Single",
+         !is.na(Sample_id)) %>% 
+  dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
+         Reads, Sex, Age, Tissue) %>% 
+  mutate_if(is.character, as_factor) 
+
+targets_file <- targets_file[c(1:7),] %>% 
+  mutate(Total_region = str_glue("{Total_region}_{Tissue}")) %>% 
+  select(-Tissue) %>% 
+  mutate(Total_region = as_factor(Total_region))
+
 target <- match(names(dt),targets_file$Sample_id, nomatch = 0)
 tardt <- match(targets_file$Sample_id, names(dt), nomatch = 0)
 #dt1 <- dt
@@ -95,7 +108,6 @@ suppressPackageStartupMessages(library('rafalib'))
 
 #subset the dataset
 dt <- dt[c(1,2, tardt)]
-targets_file <- targets_file %>% filter(Sample_id %in% colnames(dt))
 # make the matrix  -----
 mat <- dt %>%
   select(-GeneClass) %>%
@@ -236,7 +248,7 @@ sapply(seq_along(norm_list) ,function(x, n, i){
        legend= levels(as_factor(dgl_filt$samples$group)),
        fill = levels(as_factor(dgl_filt$colours)),
        bty="n",
-       cex = 0.5, inset = c(.01,.01) )}, x = norm_list, n = names(norm_list))
+       cex = 0.9, inset = c(.01,.01) )}, x = norm_list, n = names(norm_list))
 dev.off()
 
 
@@ -344,11 +356,14 @@ qValuesComBat = p.adjust(pValuesComBat,method="BH")
 
 #limma remove batch effect
 norm_l[["TMM"]] %>% plotMDS(labels = dgl_filt$samples$group, col = dgl_filt$colours)
+norm_list[["TMM"]] %>% EDASeq::plotPCA(labels = dgl_filt$samples$group,
+                col = dgl_filt$colours, cex=1, cex.axis=1, cex.lab=1)
+
 logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$Date_of_seq)
   plotMDS(logCPM,
   labels = dgl_filt$samples$group,
                 col = dgl_filt$colours,dim.plot = c(3,4))
-  
+logCPM <-   norm_l[["TMM"]] 
   d <- dist(t(logCPM))
  hc <- hclust(d,method = "ward.D2")
  myplclust(hc,
@@ -362,12 +377,22 @@ logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$Date_of_se
        bty="n",
        cex = 0.9)
 
-
 # make heatmap -----
 suppressPackageStartupMessages(library(ComplexHeatmap))
 suppressPackageStartupMessages(library(circlize))
 
-logCPM[str_detect(rownames(logCPM), "piRNA"),]
+
+logCPM <- logCPM[str_detect(rownames(logCPM), "piR"),]
+norm_list[["TMM"]] %>% 
+  as_tibble(rownames = "smallRNA") %>% 
+  filter(str_detect(smallRNA, "piR")) %>% 
+  write_tsv(str_glue("{dat_path}/CPM_brain_testis_piR_{date}_{my_exp}.txt"))
+
+filter = apply(logCPM, 1, function(x) length(x[x > 0 ]) > 6)
+logCPM_fil <- logCPM[filter, ]
+scaled_mat <- t(scale(t(as.matrix(logCPM_fil))))
+
+
 scaled_mat <- t(scale(t(as.matrix(logCPM))))
 hist(scaled_mat)
 df <- dgl_filt$samples %>% 
@@ -378,10 +403,11 @@ data.frame(Brain_partition = dgl_filt$samples$group,
 
 
 ha <- HeatmapAnnotation(df = df)
-f <- colorRamp2(c(-2,median(scaled_mat),2),c("blue","white","yellow"))
+f <- colorRamp2(c(-1,median(scaled_mat),1),c("blue","white","yellow"))
 
 # plot Heatmap
 # cluster rows and columns
+pdf(str_glue("{dat_path}/Heatmap_brain_testis_{date}_{my_exp}.pdf"))
 Heatmap(scaled_mat,
         top_annotation = ha,
         col=f,
@@ -391,13 +417,51 @@ Heatmap(scaled_mat,
         clustering_distance_columns = "spearman",
         clustering_method_columns ="ward.D2",
         show_row_names = FALSE,
-        show_col_names = FALSE,
+        show_column_names = FALSE,
         name= "z-score equivalent", 
-        column_title = str_glue("Heatmap of {nrow(scaled_mat)} smallRNAs"),
+        column_title = str_glue("Heatmap of {nrow(scaled_mat)} piRNAs"),
         column_title_side="top")  
-
+dev.off()
 
 ```
 
+## DE with one replicate, utilising NOISeq
+```{r}
+# Data packaging ------
+path_raw <- list.files(path = dat_path, pattern = "raw_reads", full.names = T)
+DT <- fread(path_raw)
+
+path_tar <- list.files(path = path, 
+                 pattern = "targets.+.csv",
+                 full.names = T,
+                 recursive = TRUE)
+
+samples <- read_tsv(path_tar) %>% 
+  mutate(Sample_id = str_replace(Sample_id,"^?","S")) %>% 
+  filter(Tissue == "Brain",
+         Dev_stage == "Adult",
+         !Single_pool == "Single",
+         !is.na(Sample_id)) %>% 
+  dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
+         Reads, Sex, Age, Single_pool) %>% 
+  mutate_if(is.character, as_factor) 
+
+samples <- samples[1:6,] %>% droplevels()
+
+dt <- DT %>% as_tibble %>% 
+  dplyr::select(smallRNA, GeneClass, as.character(samples$Sample_id))
+mybiotypes <-  DT$GeneClass
+
+mat <- dt %>% 
+  select(-GeneClass) %>% 
+  column_to_rownames("smallRNA") %>% 
+  as.matrix()
+
+
+mydata <- readData(data = mat, factors = as.data.frame(samples), biotype = mybiotypes)
+
+
+
+```
 
 The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
