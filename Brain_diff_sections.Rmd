@@ -64,10 +64,13 @@ targets_file <- fread(targ_path) %>%
 
 targets_file <- targets_file %>% 
   filter(Tissue == "Brain",
-         Dev_stage == "Adult") %>% 
+         Dev_stage == "Adult",
+         !Single_pool == "Single",
+         !is.na(Sample_id)) %>% 
   dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
          Reads, Sex, Age, Single_pool) %>% 
   mutate_if(is.character, as_factor) 
+  
 
 target <- match(names(dt),targets_file$Sample_id, nomatch = 0)
 tardt <- match(targets_file$Sample_id, names(dt), nomatch = 0)
@@ -138,12 +141,12 @@ dim(dgl);dim(dgl_filt)
 str_glue( "Starting features: {nrow(dgl)}\nedgeR filter, remaining features: {nrow(dgl_filt)}\nCPM approach, remaining features: {nrow(NOISeq_filt[[1]])}\nWilcoxon filter, remaining features: {nrow(NOISeq_filt[[2]])}\nProportion approach filter, remaining features: {nrow(NOISeq_filt[[3]])}")
 
 # if we want to keep noiseq filter instead of edger but use edger object ----
-filte_Nois <- dgl[rownames(dgl$counts) %in% rownames(NOISeq_filt[[3]]),,keep.lib.sizes=FALSE]
+filte_Nois <- dgl[rownames(dgl$counts) %in% rownames(NOISeq_filt[[i]]),,keep.lib.sizes=FALSE]
 
-dgl_filt <- DGEList(counts = NOISeq_filt[[3]],
+dgl_filt <- DGEList(counts = NOISeq_filt[[i]],
                samples = targets_file,
-               lib.size = colSums(NOISeq_filt[[3]]),
-               norm.factors = rep(1,ncol(NOISeq_filt[[3]])))
+               lib.size = colSums(NOISeq_filt[[i]]),
+               norm.factors = rep(1,ncol(NOISeq_filt[[i]])))
 # finally give colours to samples ----
 suppressPackageStartupMessages(library('wesanderson'))
 pal1 <- wes_palette(length(levels(as_factor(targets_file$group))),
@@ -162,7 +165,7 @@ EDASeq::plotRLE(dgl_filt$counts, col=dgl_filt$colours,
                 outline=FALSE, las=3, ylab="Relative Log Expression", 
                 cex.axis=1, cex.lab=1)
 EDASeq::plotPCA(dgl_filt$counts, 
-                col=dgl_filt$colours, cex=1, cex.axis=1, cex.lab=1)
+                col = dgl_filt$colours, cex=1, cex.axis=1, cex.lab=1)
 
 dataEDA <- EDASeq::newSeqExpressionSet(counts = dgl_filt$counts, 
   phenoData = as.data.frame(dgl_filt$samples, row.names = rownames(dgl_filt$samples)))
@@ -340,10 +343,10 @@ pValuesComBat = f.pvalue(combat_edata,mod,mod0)
 qValuesComBat = p.adjust(pValuesComBat,method="BH")
 
 #limma remove batch effect
-norm_l[["TMM"]] %>% plotMDS
+norm_l[["TMM"]] %>% plotMDS(labels = dgl_filt$samples$group, col = dgl_filt$colours)
 logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$Date_of_seq)
   plotMDS(logCPM,
-  labels = targets_file$samples,
+  labels = dgl_filt$samples$group,
                 col = dgl_filt$colours,dim.plot = c(3,4))
   
   d <- dist(t(logCPM))
@@ -359,7 +362,41 @@ logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$Date_of_se
        bty="n",
        cex = 0.9)
 
-  
+
+# make heatmap -----
+suppressPackageStartupMessages(library(ComplexHeatmap))
+suppressPackageStartupMessages(library(circlize))
+
+logCPM[str_detect(rownames(logCPM), "piRNA"),]
+scaled_mat <- t(scale(t(as.matrix(logCPM))))
+hist(scaled_mat)
+df <- dgl_filt$samples %>% 
+  select(group, Date_of_seq, Sex, Age)
+
+data.frame(Brain_partition = dgl_filt$samples$group,
+                 Date_of_seq)  
+
+
+ha <- HeatmapAnnotation(df = df)
+f <- colorRamp2(c(-2,median(scaled_mat),2),c("blue","white","yellow"))
+
+# plot Heatmap
+# cluster rows and columns
+Heatmap(scaled_mat,
+        top_annotation = ha,
+        col=f,
+        show_row_dend = TRUE,
+        clustering_distance_rows = "spearman",
+        clustering_method_rows="ward.D2",
+        clustering_distance_columns = "spearman",
+        clustering_method_columns ="ward.D2",
+        show_row_names = FALSE,
+        show_col_names = FALSE,
+        name= "z-score equivalent", 
+        column_title = str_glue("Heatmap of {nrow(scaled_mat)} smallRNAs"),
+        column_title_side="top")  
+
+
 ```
 
 
