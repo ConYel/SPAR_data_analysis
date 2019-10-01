@@ -11,8 +11,10 @@ editor_options:
 ---
 ## load libraries
 ```{r load libraries}
-suppressPackageStartupMessages(library('tidyverse'))
-suppressPackageStartupMessages(library('data.table'))
+suppressPackageStartupMessages({
+  library('tidyverse')
+  library('data.table')
+})
 ```
 ## add date
 ```{r date_of_analysis}
@@ -101,10 +103,12 @@ dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{date}_{my_exp}_SPAR.txt"))
 
 ## Perform various Filtering Methods: EdgeR, NOIseq
 ```{r}
-suppressPackageStartupMessages(library('edgeR'))
-suppressPackageStartupMessages(library('NOIseq'))# there is a problem loading it 
-# I load it manually 
-suppressPackageStartupMessages(library('rafalib'))
+suppressPackageStartupMessages({
+  library('edgeR')
+  library('rafalib')
+  library('NOIseq')
+  })
+
 
 #subset the dataset
 dt <- dt[c(1,2, tardt)]
@@ -378,9 +382,10 @@ logCPM <-   norm_l[["TMM"]]
        cex = 0.9)
 
 # make heatmap -----
-suppressPackageStartupMessages(library(ComplexHeatmap))
-suppressPackageStartupMessages(library(circlize))
-
+suppressPackageStartupMessages({
+  library(ComplexHeatmap)
+  library(circlize)
+  })
 
 logCPM <- logCPM[str_detect(rownames(logCPM), "piR"),]
 norm_list[["TMM"]] %>% 
@@ -450,7 +455,9 @@ samples <- samples[1:6,] %>% droplevels()
 
 dt <- DT %>% as_tibble %>% 
   dplyr::select(smallRNA, GeneClass, as.character(samples$Sample_id))
+
 mybiotypes <-  DT$GeneClass
+names(mybiotypes) <-  DT$smallRNA
 
 mat <- dt %>% 
   select(-GeneClass) %>% 
@@ -460,7 +467,126 @@ mat <- dt %>%
 
 mydata <- readData(data = mat, factors = as.data.frame(samples), biotype = mybiotypes)
 
+#  5.2 NOISEQ explore data with -------
+mybiodetection <- dat(mydata, k = 0, type = "biodetection", factor = NULL)
+mycountsbio <- dat(mydata, factor = NULL, type = "countsbio")
+#
+par(mfrow = c(1, 1))
+explo.plot(mycountsbio, samples = NULL, toplot = 1, plottype = "barplot")
+#  5.3 NOISEQ filter data------
+myfilt <- filtered.data(mat, factor = "Total_region",
+                        norm = FALSE, depth = NULL,
+                        method = 1, cv.cutoff = 100, cpm = 1)
+myfiltdata <- readData(data = myfilt, factors = samples, biotype = mybiotypes)
 
+#  5.4 NOISEQ DE with one sample -----
+myresults <- noiseq(myfiltdata, 
+                    factor = "Total_region", 
+                    conditions = c("COLO205","CACO2"),
+                    k = NULL,
+                    norm = "tmm", pnr = 0.2,
+                    nss = 5, v = 0.02, lc = 1, replicates = "no")
+
+mynoiseDE <- degenes(myresults, q = 0.9, M = NULL)
+mynoiseDE %>% 
+  as_tibble(rownames = "smallRNA") %>% 
+  arrange(desc(M,prob)) %>% 
+  filter(str_detect(smallRNA,"piR"))
+
+DE.plot(myresults, q = 0.9 , graphic = "MD")
+DE.plot(myresults, q = 0.9 , graphic = "expr", log.scale = TRUE)
+
+list_compar <- list(Thalamus = c("Thalamus","Total"),
+                    Frontal_Lobe = c("Frontal Lobe","Total"),
+                    Occipital_Lobe = c("Occipital Lobe","Total"),
+                    Parietal_Lobe = c("Parietal Lobe","Total"),
+                    Temporal_Lobe = c("Temporal Lobe","Total"))
+
+myresults <- lapply(list_compar, function(x){
+  noiseq(myfiltdata, 
+      factor = "Total_region", 
+      conditions = x,
+      k = NULL,
+      norm = "tmm", pnr = 0.2,
+      nss = 5, v = 0.02, lc = 1, replicates = "no")
+} )
+
+mynoiseDE <- lapply(myresults,function(x){
+  degenes(x, q = 0.9, M = NULL)
+})
+
+mynoiseDE2 <- lapply(as.list(names(mynoiseDE)), function(x){
+  mynoiseDE[[x]] %>% as_tibble(rownames = "smallRNA")
+})
+
+names(mynoiseDE2) <- names(mynoiseDE)
+
+complete_DEs <- rbindlist(mynoiseDE2,use.names = TRUE,
+                          idcol = "comparison",fill = TRUE) %>%
+  as_tibble() %>% 
+  write_tsv(str_glue("{dat_path}/DE_NOISeq_vs_Total_{date}_{my_exp}.txt"))
+
+#complete_DEs <- read_rds("/home/rstudio/Documents/new_analysis_workflow/results_R/results_with_DBs/Cell_lines_Testis_exp/only_cell_lines/PCA_hypergeo/NOISEQ_complete_DEs.rds")
+
+piRNADE <- complete_DEs %>% 
+  filter(Biotype == "piRNA") 
+
+piRname <- piRNADE %>% 
+  select(smallRNA,comparison,M) %>% 
+  spread(key = comparison, M) %>% drop_na()
+
+piRNADE %>% 
+  filter(smallRNA %in% piRname$smallRNA)
+
+#  5.5 NOISEQ  heatmap -----
+library(ComplexHeatmap);library(circlize)
+mat <- fread("/home/rstudio/Documents/new_analysis_workflow/results_R/results_with_DBs/Cell_lines_Testis_exp/only_cell_lines/PCA_hypergeo/Cell_lines_norm_TMMwzp_cpm_0.3filter_counts.txt") %>% 
+  as_tibble() %>% 
+  filter(smallRNA %in% piRname$smallRNA) %>% 
+  separate(smallRNA,c("DB","sRNA"), sep = "_match_") %>% 
+  select(-DB) %>% 
+  column_to_rownames("sRNA") %>% as.matrix()
+
+scaled_mat <- t(scale(t(as.matrix(mat))))
+hist(scaled_mat)
+df <- data.frame(cell_line = colnames(scaled_mat)) 
+
+f <- colorRamp2(c(-2,median(scaled_mat),2),c("blue","white","yellow"))
+
+
+ha <- HeatmapAnnotation(df)
+# plot Heatmap
+# cluster only rows
+Heatmap(scaled_mat,
+        top_annotation = ha,
+        col=f,
+        show_row_dend = TRUE,
+        clustering_distance_rows = "spearman",
+        clustering_method_rows="ward.D2",
+        cluster_columns = TRUE,
+        #column_order = c(1,2,6,5,7,3,4),
+        heatmap_legend_param = cm,
+        show_row_names = TRUE,
+        name = "z-score equivalent", 
+        column_title = str_glue("Heatmap of {nrow(mat)} piRNAs"),
+        column_title_side = "top",
+        km = 1)
+
+f <- colorRamp2(c(min(mat),mean(mat),max(mat)),c("blue","white","yellow"))
+Heatmap(mat,
+        top_annotation = ha,
+        col=f,
+        show_row_dend = TRUE,
+        clustering_distance_rows = "spearman",
+        clustering_method_rows="ward.D2",
+        cluster_columns = TRUE,
+        #column_order = c(1,2,6,5,7,3,4),
+        heatmap_legend_param = cm,
+        show_row_names = TRUE,
+        name = "cpm", 
+        column_title = str_glue("Heatmap of {nrow(mat)} piRNAs"),
+        column_title_side = "top",
+        km = 1)
 
 ```
 
