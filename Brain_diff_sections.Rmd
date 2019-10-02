@@ -1,7 +1,7 @@
 ---
 title: "R Notebook, analysis of brain samples, different sections"
 author: "Constantinos Yeles"
-date: "`r format(Sys.time(), '%a_%b_%d_%Y')`"
+todate: "`r format(Sys.time(), '%a_%b_%d_%Y')`"
 output:
   pdf_document: default
   html_document:
@@ -16,9 +16,9 @@ suppressPackageStartupMessages({
   library('data.table')
 })
 ```
-## add date
-```{r date_of_analysis}
-date <- format(Sys.time(), "%d_%b_%Y")
+## add todate
+```{r todate_of_analysis}
+todate <- format(Sys.time(), "%d_%b_%Y")
 ```
 ## create the dir for the analysis
 ```{r}
@@ -67,18 +67,18 @@ targets_file <- fread(targ_path) %>%
 targets_file <- targets_file %>% 
   filter(Tissue == "Brain",
          Dev_stage == "Adult",
-         !Single_pool == "Single",
-         !is.na(Sample_id)) %>% 
-  dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
+         !Single_pool == "Single" | Total_region == "Cerebellum",
+         !is.na(Sample_id),
+         !is.na(Age)) %>% 
+  dplyr::select(samples = "Samples", Sample_id, todate_of_seq, Total_region,
          Reads, Sex, Age, Single_pool) %>% 
   mutate_if(is.character, as_factor) 
-  
 
 targets_file <- targets_file %>% 
   filter(Dev_stage == "Adult",
          !Single_pool == "Single",
          !is.na(Sample_id)) %>% 
-  dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
+  dplyr::select(samples = "Samples", Sample_id, todate_of_seq, Total_region,
          Reads, Sex, Age, Tissue) %>% 
   mutate_if(is.character, as_factor) 
 
@@ -98,7 +98,7 @@ names(dt)[tardt] <- as.character(targets_file$samples[target])
 stopifnot(identical(targets_file$Sample_id,names(dt)[3:length(names(dt))]))
 
 # write the results  -----
-dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{date}_{my_exp}_SPAR.txt"))
+dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{todate}_{my_exp}_SPAR.txt"))
 ```
 
 ## Perform various Filtering Methods: EdgeR, NOIseq
@@ -133,11 +133,11 @@ colnames(design) <- gsub("targets_file\\$group","",colnames(design))
 rownames(design) <- targets_file$group
 # another design considering batch ----
 design <- model.matrix(~0 + targets_file$group + 
-                         targets_file$Date_of_seq)
+                         targets_file$todate_of_seq)
 
 colnames(design) <- colnames(design) %>% 
   str_remove("targets_file\\$group") %>% 
-  str_remove("targets_file\\$Date_of_seq") 
+  str_remove("targets_file\\$todate_of_seq") 
   str_remove("targets_file\\$Sex") %>% 
   str_remove("targets_file\\$Donors")
 rownames(design) <- targets_file$group
@@ -195,7 +195,7 @@ AveLogCpm_Filtered_Data <-aveLogCPM(dgl_filt)
 
 par(mfrow=c(1,2))
 
-pdf(str_glue("{dat_path}/histogram_plot_{date}_{my_exp}.pdf"))
+pdf(str_glue("{dat_path}/histogram_plot_{todate}_{my_exp}.pdf"))
 hist(AveLogCpm_Raw_Data)
 hist(AveLogCpm_Filtered_Data)
 dev.off()
@@ -241,7 +241,7 @@ norm_list <- list("Not normalized" = cpm(edger_norm[[1]],normalized.lib.sizes = 
                   "voom_TMM" = 2^voomQW_norm[[2]]$E,
                   "voom_TMMwsp" = 2^voomQW_norm[[3]]$E)
 
-pdf(str_glue("{dat_path}/RLE_plots_{date}_{my_exp}.pdf"))
+pdf(str_glue("{dat_path}/RLE_plots_{todate}_{my_exp}.pdf"))
 
 sapply(seq_along(norm_list) ,function(x, n, i){ 
        EDASeq::plotRLE(x[[i]], col=dgl_filt$colours,
@@ -262,7 +262,7 @@ dev.off()
 #                outline=FALSE, las=3, ylab="Relative Log Expression", 
 #                cex.axis=1, cex.lab=1, main = "TMM")
 
-#write_rds(x1_TMM,str_glue("x1_TMMwzp_{experiment}_{date}.rds"))
+#write_rds(x1_TMM,str_glue("x1_TMMwzp_{experiment}_{todate}.rds"))
 #x1_voomTMM <- read_rds("~/Documents/new_analysis_workflow/results_R/results_with_DBs/3_IPP_PIWIL1_all_DBs/x1_voomTMM.rds")
 ```
 
@@ -288,7 +288,7 @@ l_hc <- sapply(hc_methods, function(x) lapply(l_d, function(y) hclust(y,method =
 
 names(l_hc) <- rep(rownames(l_hc),times = ncol(l_hc))
 
-pdf(str_glue("{dat_path}/hierarchic_clust_{date}_{my_exp}.pdf"))
+pdf(str_glue("{dat_path}/hierarchic_clust_{todate}_{my_exp}.pdf"))
 for (i in seq_along(l_hc)) {
   myplclust(l_hc[[i]],
             lab.col = dgl_filt$colours, #x1$colours,pal1$value
@@ -327,11 +327,11 @@ dev.off()
 ```{r}
 suppressPackageStartupMessages(library('sva'))
 # full model
-mod <-  model.matrix(~dgl_filt$samples$group+dgl_filt$samples$Date_of_seq,
+mod <-  model.matrix(~dgl_filt$samples$group+dgl_filt$samples$todate_of_seq,
                      data = dgl_filt$samples)
 colnames(mod) <- colnames(mod) %>% 
   str_remove("dgl_filt\\$samples\\$group") %>% 
-  str_remove("dgl_filt\\$samples\\$Date_of_seq") 
+  str_remove("dgl_filt\\$samples\\$todate_of_seq") 
   str_remove("targets_file\\$Sex") %>% 
   str_remove("targets_file\\$Donors")
 
@@ -351,7 +351,7 @@ fit = lmFit(voomQW_norm[[1]],modSv)
 # combat
 norm_l[["TMM"]]
 modcombat <-  model.matrix(~1, data=dgl_filt$samples)
-combat_edata <- ComBat(norm_l[["TMM"]], batch = dgl_filt$samples$Date_of_seq,
+combat_edata <- ComBat(norm_l[["TMM"]], batch = dgl_filt$samples$todate_of_seq,
                        mod = modcombat, par.prior = TRUE,
                        prior.plots = FALSE,
   mean.only = FALSE, ref.batch = NULL, BPPARAM = bpparam("SerialParam"))
@@ -363,7 +363,7 @@ norm_l[["TMM"]] %>% plotMDS(labels = dgl_filt$samples$group, col = dgl_filt$colo
 norm_list[["TMM"]] %>% EDASeq::plotPCA(labels = dgl_filt$samples$group,
                 col = dgl_filt$colours, cex=1, cex.axis=1, cex.lab=1)
 
-logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$Date_of_seq)
+logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$todate_of_seq)
   plotMDS(logCPM,
   labels = dgl_filt$samples$group,
                 col = dgl_filt$colours,dim.plot = c(3,4))
@@ -391,7 +391,7 @@ logCPM <- logCPM[str_detect(rownames(logCPM), "piR"),]
 norm_list[["TMM"]] %>% 
   as_tibble(rownames = "smallRNA") %>% 
   filter(str_detect(smallRNA, "piR")) %>% 
-  write_tsv(str_glue("{dat_path}/CPM_brain_testis_piR_{date}_{my_exp}.txt"))
+  write_tsv(str_glue("{dat_path}/CPM_brain_testis_piR_{todate}_{my_exp}.txt"))
 
 filter = apply(logCPM, 1, function(x) length(x[x > 0 ]) > 6)
 logCPM_fil <- logCPM[filter, ]
@@ -401,10 +401,10 @@ scaled_mat <- t(scale(t(as.matrix(logCPM_fil))))
 scaled_mat <- t(scale(t(as.matrix(logCPM))))
 hist(scaled_mat)
 df <- dgl_filt$samples %>% 
-  select(group, Date_of_seq, Sex, Age)
+  select(group, todate_of_seq, Sex, Age)
 
 data.frame(Brain_partition = dgl_filt$samples$group,
-                 Date_of_seq)  
+                 todate_of_seq)  
 
 
 ha <- HeatmapAnnotation(df = df)
@@ -412,7 +412,7 @@ f <- colorRamp2(c(-1,median(scaled_mat),1),c("blue","white","yellow"))
 
 # plot Heatmap
 # cluster rows and columns
-pdf(str_glue("{dat_path}/Heatmap_brain_testis_{date}_{my_exp}.pdf"))
+pdf(str_glue("{dat_path}/Heatmap_brain_testis_{todate}_{my_exp}.pdf"))
 Heatmap(scaled_mat,
         top_annotation = ha,
         col=f,
@@ -445,13 +445,15 @@ samples <- read_tsv(path_tar) %>%
   mutate(Sample_id = str_replace(Sample_id,"^?","S")) %>% 
   filter(Tissue == "Brain",
          Dev_stage == "Adult",
-         !Single_pool == "Single",
-         !is.na(Sample_id)) %>% 
-  dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
+         !Single_pool == "Single" | Total_region == "Cerebellum",
+         !is.na(Sample_id),
+         !is.na(Age)) %>% 
+  dplyr::select(samples = "Samples", Sample_id, todate_of_seq, Total_region,
          Reads, Sex, Age, Single_pool) %>% 
+  mutate(Total_region = str_replace(Total_region," ","_")) %>% 
   mutate_if(is.character, as_factor) 
 
-samples <- samples[1:6,] %>% droplevels()
+samples <- samples %>% droplevels()
 
 dt <- DT %>% as_tibble %>% 
   dplyr::select(smallRNA, GeneClass, as.character(samples$Sample_id))
@@ -477,7 +479,8 @@ explo.plot(mycountsbio, samples = NULL, toplot = 1, plottype = "barplot")
 myfilt <- filtered.data(mat, factor = "Total_region",
                         norm = FALSE, depth = NULL,
                         method = 1, cv.cutoff = 100, cpm = 1)
-myfiltdata <- readData(data = myfilt, factors = samples, biotype = mybiotypes)
+myfiltdata <- readData(data = myfilt, factors = as.data.frame(samples),
+                       biotype = mybiotypes)
 
 #  5.4 NOISEQ DE with one sample -----
 myresults <- noiseq(myfiltdata, 
@@ -496,20 +499,32 @@ mynoiseDE %>%
 DE.plot(myresults, q = 0.9 , graphic = "MD")
 DE.plot(myresults, q = 0.9 , graphic = "expr", log.scale = TRUE)
 
-list_compar <- list(Thalamus = c("Thalamus","Total"),
-                    Frontal_Lobe = c("Frontal Lobe","Total"),
-                    Occipital_Lobe = c("Occipital Lobe","Total"),
-                    Parietal_Lobe = c("Parietal Lobe","Total"),
-                    Temporal_Lobe = c("Temporal Lobe","Total"))
+list_compar <- list(Cerebellum = c("Cerebellum", "Total"),
+                    Thalamus = c("Thalamus","Total"),
+                    Frontal_Lobe = c("Frontal_Lobe","Total"),
+                    Occipital_Lobe = c("Occipital_Lobe","Total"),
+                    Parietal_Lobe = c("Parietal_Lobe","Total"),
+                    Temporal_Lobe = c("Temporal_Lobe","Total"))
 
-myresults <- lapply(list_compar, function(x){
+myresults <- lapply(list_compar, function(total){
   noiseq(myfiltdata, 
       factor = "Total_region", 
-      conditions = x,
+      conditions = total,
       k = NULL,
       norm = "tmm", pnr = 0.2,
       nss = 5, v = 0.02, lc = 1, replicates = "no")
 } )
+
+
+DE.plot(myresults, q = 0.9 , graphic = "MD")
+sapply(myresults, function(x){
+  DE.plot(x, q = 0.9 , graphic = "MD")
+  })
+
+DE.plot(myresults, q = 0.9 , graphic = "expr", log.scale = TRUE)
+sapply(myresults, function(x){
+  DE.plot(x, q = 0.9 , "expr", log.scale = TRUE)
+  })
 
 mynoiseDE <- lapply(myresults,function(x){
   degenes(x, q = 0.9, M = NULL)
@@ -518,13 +533,29 @@ mynoiseDE <- lapply(myresults,function(x){
 mynoiseDE2 <- lapply(as.list(names(mynoiseDE)), function(x){
   mynoiseDE[[x]] %>% as_tibble(rownames = "smallRNA")
 })
-
 names(mynoiseDE2) <- names(mynoiseDE)
 
-complete_DEs <- rbindlist(mynoiseDE2,use.names = TRUE,
-                          idcol = "comparison",fill = TRUE) %>%
-  as_tibble() %>% 
-  write_tsv(str_glue("{dat_path}/DE_NOISeq_vs_Total_{date}_{my_exp}.txt"))
+mynoiseDE_sep <- lapply(as.list(names(mynoiseDE2)),USE.NAMES = TRUE, function(x){
+  mynoiseDE2[[x]] %>% 
+    rename(log2FC = "M") %>% 
+    select(-D, -ranking)
+})
+names(mynoiseDE_sep) <- names(mynoiseDE2)
+
+mapply(function(x, i)
+  write_tsv(x, path = str_glue("{dat_path}/DE_{i}_vs_Total_{todate}_{my_exp}.txt")), 
+  mynoiseDE_sep, 
+  names(mynoiseDE_sep) , SIMPLIFY = FALSE 
+)
+
+
+
+
+complete_DEs <- bind_rows(mynoiseDE2, .id = "comparison") %>% 
+  select(comparison, smallRNA, 
+         Biotype, log2FC = "M", prob,Total_mean, everything()) %>% 
+  select(-D, -ranking) %>% 
+  write_tsv(str_glue("{dat_path}/DE_NOISeq_vs_Total_{todate}_{my_exp}.txt"))
 
 #complete_DEs <- read_rds("/home/rstudio/Documents/new_analysis_workflow/results_R/results_with_DBs/Cell_lines_Testis_exp/only_cell_lines/PCA_hypergeo/NOISEQ_complete_DEs.rds")
 
@@ -532,61 +563,84 @@ piRNADE <- complete_DEs %>%
   filter(Biotype == "piRNA") 
 
 piRname <- piRNADE %>% 
-  select(smallRNA,comparison,M) %>% 
-  spread(key = comparison, M) %>% drop_na()
+  select(smallRNA,comparison, log2FC) %>% 
+  spread(key = comparison, log2FC) %>% drop_na()
 
 piRNADE %>% 
   filter(smallRNA %in% piRname$smallRNA)
 
 #  5.5 NOISEQ  heatmap -----
 library(ComplexHeatmap);library(circlize)
-mat <- fread("/home/rstudio/Documents/new_analysis_workflow/results_R/results_with_DBs/Cell_lines_Testis_exp/only_cell_lines/PCA_hypergeo/Cell_lines_norm_TMMwzp_cpm_0.3filter_counts.txt") %>% 
+mat <- fread(".txt") %>% 
   as_tibble() %>% 
   filter(smallRNA %in% piRname$smallRNA) %>% 
   separate(smallRNA,c("DB","sRNA"), sep = "_match_") %>% 
   select(-DB) %>% 
   column_to_rownames("sRNA") %>% as.matrix()
 
+mat <- dt %>% 
+  filter(smallRNA %in% piRname$smallRNA) %>% 
+  select(-GeneClass) %>% 
+  column_to_rownames("smallRNA") %>% as.matrix()
+
+
 scaled_mat <- t(scale(t(as.matrix(mat))))
 hist(scaled_mat)
-df <- data.frame(cell_line = colnames(scaled_mat)) 
+df <- samples %>% 
+  select( Date_of_seq, Total_region, Sex, Age) %>% 
+  base::as.data.frame()
+  
 
-f <- colorRamp2(c(-2,median(scaled_mat),2),c("blue","white","yellow"))
+f_col <- colorRamp2(c(-1,0,1),c("blue","white","yellow"))
 
-
-ha <- HeatmapAnnotation(df)
+ha <- HeatmapAnnotation(df = df, annotation_name_side = "left")
 # plot Heatmap
 # cluster only rows
-Heatmap(scaled_mat,
+h1 <- Heatmap(scaled_mat,
         top_annotation = ha,
-        col=f,
+        col=f_col,
         show_row_dend = TRUE,
         clustering_distance_rows = "spearman",
         clustering_method_rows="ward.D2",
-        cluster_columns = TRUE,
-        #column_order = c(1,2,6,5,7,3,4),
-        heatmap_legend_param = cm,
-        show_row_names = TRUE,
-        name = "z-score equivalent", 
-        column_title = str_glue("Heatmap of {nrow(mat)} piRNAs"),
-        column_title_side = "top",
-        km = 1)
+        clustering_distance_columns = "spearman",
+        clustering_method_columns ="ward.D2",
+        show_row_names = FALSE,
+        show_column_names = FALSE,
+        name= "z-score expression") 
+        #column_title = str_glue("Heatmap of {nrow(scaled_mat)} piRNAs"),
+        #column_title_side="top") 
 
-f <- colorRamp2(c(min(mat),mean(mat),max(mat)),c("blue","white","yellow"))
-Heatmap(mat,
-        top_annotation = ha,
-        col=f,
+mat1 <- piRname %>% 
+  replace(is.na(.),0) %>% 
+  column_to_rownames("smallRNA") %>% 
+  as.matrix()
+scaled_mat1 <- t(scale(t(as.matrix(mat1))))
+hist(scaled_mat1)
+f_col1 <- colorRamp2(c(-1,0,1),c("forestgreen","white","red"))
+df1 <- df %>% filter(!Total_region == "Total") %>% 
+  select(Region = "Total_region")
+ha1 <- HeatmapAnnotation(df = df1)
+h2 <- Heatmap(scaled_mat1,
+        top_annotation = ha1,
+        col=f_col1,
         show_row_dend = TRUE,
         clustering_distance_rows = "spearman",
         clustering_method_rows="ward.D2",
-        cluster_columns = TRUE,
-        #column_order = c(1,2,6,5,7,3,4),
-        heatmap_legend_param = cm,
-        show_row_names = TRUE,
-        name = "cpm", 
-        column_title = str_glue("Heatmap of {nrow(mat)} piRNAs"),
-        column_title_side = "top",
-        km = 1)
+        clustering_distance_columns = "spearman",
+        clustering_method_columns ="ward.D2",
+        show_row_names = FALSE,
+        show_column_names = FALSE,
+        name= "z-score log2FC") 
+       # column_title = str_glue("Heatmap of {nrow(scaled_mat)} piRNAs"),
+        #column_title_side="top") 
+ht_list = h1 + h2  
+
+pdf(str_glue("{dat_path}/Heatmap_brain_testis_{todate}_{my_exp}.pdf"), paper = "a4r")
+draw(ht_list, row_title = str_glue("hierarchical clustering"), 
+     row_title_gp = gpar(col = "forestgreen"),
+    column_title = str_glue("Heatmap of {nrow(scaled_mat)} piRNAs"), 
+    column_title_gp = gpar(fontsize = 16))
+dev.off()
 
 ```
 
