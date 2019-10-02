@@ -20,7 +20,7 @@ todate <- format(Sys.time(), "%d_%b_%Y")
 ```
 ## create the dir for the analysis
 ```{r}
-my_exp <- "GSE63501_analysis"
+my_exp <- "GSE63501"
 dir.create(str_glue("/home/0/SPAR_data_analysis/{my_exp}_analysis"))
 dat_path <- str_glue("{my_exp}_analysis")
 ```
@@ -54,33 +54,23 @@ names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>%
 
 # load the targets file ----
 targ_path <- dir(path = path, 
-                 pattern = "targets.+.csv",
+                 pattern = "Sra",
                  full.names = T,
                  recursive = TRUE)
 
 targets_file <- fread(targ_path) %>%
-  as_tibble() %>% 
-  mutate(Sample_id = str_replace(Sample_id,"^?","S"))
+  as_tibble() 
 
 targets_file <- targets_file %>% 
-  filter(Tissue == "Brain",
-         Dev_stage == "Adult",
-         !Single_pool == "Single",
-         !is.na(Sample_id)) %>% 
-  dplyr::select(samples = "Samples", Sample_id, todate_of_seq, Total_region,
-         Reads, Sex, Age, Single_pool) %>% 
+  dplyr::select(Run, BioSample, classification, Instrument) %>% 
   mutate_if(is.character, as_factor) 
-  
 
 target <- match(names(dt),targets_file$Sample_id, nomatch = 0)
 tardt <- match(targets_file$Sample_id, names(dt), nomatch = 0)
 #dt1 <- dt
 names(dt)[tardt] <- as.character(targets_file$samples[target])
 
-#tibble(names(dt)[3:length(names(dt))],targets_file$Sample_id)
-#tibble(names(dt1), names(dt))
-
-stopifnot(identical(targets_file$Sample_id,names(dt)[3:length(names(dt))]))
+stopifnot(identical(targets_file$Run,names(dt)[3:length(names(dt))]))
 
 # write the results  -----
 dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{todate}_{my_exp}_SPAR.txt"))
@@ -88,45 +78,51 @@ dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{todate}_{my_exp}_SPAR.txt"))
 
 ## Perform various Filtering Methods: EdgeR, NOIseq
 ```{r}
-# load dataset
-DT
+# load dataset ----
+DT <- fread(list.files(path = dat_path, pattern = "raw" ))
 suppressPackageStartupMessages(library('edgeR'))
 suppressPackageStartupMessages(library('NOIseq'))# there is a problem loading it 
 # I load it manually 
 suppressPackageStartupMessages(library('rafalib'))
+stopifnot(identical(targets_file$Run,names(dt)[3:length(names(dt))]))
+# exploratory analysis with NOISeq -----
+mybiotypes <-  dt$GeneClass
+names(mybiotypes) <-  dt$smallRNA
 
-#subset the dataset
-dt <- dt[c(1,2, tardt)]
-targets_file <- targets_file %>% filter(Sample_id %in% colnames(dt))
-# make the matrix  -----
+# make the matrix  
 mat <- dt %>%
   select(-GeneClass) %>%
   column_to_rownames("smallRNA") %>%
   as.matrix()
-# explore with NOISeq -----
-dt <- DT %>% as_tibble %>% 
-  dplyr::select(smallRNA, GeneClass, as.character(samples$Sample_id))
+# make clearer names
+colnames(mat) <- str_glue("{targets_file$classification}_{colnames(mat)}") %>% 
+  str_replace("Control","Ctl")
+targets_file$Run <- colnames(mat)
 
-mybiotypes <-  DT$GeneClass
-names(mybiotypes) <-  DT$smallRNA
+# NOISeq dataset
+mydata <- readData(data = mat, factors = as.data.frame(targets_file), biotype = mybiotypes)
 
-mat <- dt %>% 
-  select(-GeneClass) %>% 
-  column_to_rownames("smallRNA") %>% 
-  as.matrix()
+mybiodetection <- dat(mydata, k = 0, type = "biodetection", factor = NULL)
+par(mfrow = c(1, 2))
+explo.plot(mybiodetection, samples = c(1,3), toplot = "piRNA",plottype = "comparison")
+mycountsbio <- dat(mydata, factor = NULL, type = "countsbio")
+par(mfrow = c(1,1 ))
 
-
-mydata <- readData(data = mat, factors = as.data.frame(samples), biotype = mybiotypes)
+pdf(str_glue("{dat_path}/biodetection_expression_{todate}_{my_exp}.pdf"))
+sapply(seq(ncol(mat)) ,function(x){
+explo.plot(mycountsbio, toplot = 2, samples = x, plottype = "boxplot")
+})
+dev.off()
 # filtering with NOISEq  -----
 noiL <- as.list(1L:3)
 names(noiL) <- c("cpm", "Wilcoxon", "Prop")
 NOISeq_filt <- lapply(noiL, function(x) NOISeq::filtered.data(mat, 
-        factor = targets_file$Total_region,
+        factor = targets_file$classification,
         norm = FALSE, 
         method = x, cv.cutoff=100, cpm=1))
 
 # create the design matrix  -----
-targets_file <- targets_file %>% dplyr::rename(group = "Total_region")
+targets_file <- targets_file %>% dplyr::rename(group = "classification")
 design <- model.matrix(~targets_file$group)
 colnames(design) <- gsub("targets_file\\$group","",colnames(design))
 rownames(design) <- targets_file$group
