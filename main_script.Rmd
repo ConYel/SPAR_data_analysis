@@ -309,7 +309,6 @@ legend("topright",
        bty="n",
        cex = 1.5, inset = c(.01,.09) )
 
-
 plotMDS(lcpm_TMM, labels = str_glue("{targets_file$Run}"),
                 col=x1_TMM$colours,dim.plot = c(3,4),main="MDS plot")
 dev.off()

@@ -148,10 +148,11 @@ dgl_filt <- DGEList(counts = NOISeq_filt[[i]],
                samples = targets_file,
                lib.size = colSums(NOISeq_filt[[i]]),
                norm.factors = rep(1,ncol(NOISeq_filt[[i]])))
+
 # finally give colours to samples ----
 suppressPackageStartupMessages(library('wesanderson'))
 pal1 <- wes_palette(length(levels(as_factor(targets_file$group))),
-                    name = "Darjeeling1", type = "continuous") %>%
+                    name = "Darjeeling1", type = "discrete") %>%
   enframe(name = NULL) %>%
   mutate(
     group = as_factor(levels(targets_file$group)))
@@ -159,12 +160,12 @@ pal1 <- wes_palette(length(levels(as_factor(targets_file$group))),
 # add color to the DGEList 
 dgl_filt$colours <- inner_join(dgl_filt$samples,pal1,by= "group")$value
 
-
 # plot RLE and other functions from EDASeq ----
 suppressPackageStartupMessages(library('EDASeq'))
+par(mar=c(8,4,4,2))
 EDASeq::plotRLE(dgl_filt$counts, col=dgl_filt$colours, 
-                outline=FALSE, las=3, ylab="Relative Log Expression", 
-                cex.axis=1, cex.lab=1)
+                outline=FALSE,las = 2, ylab="Relative Log Expression", 
+                cex.axis=1, cex.lab=1, )
 EDASeq::plotPCA(dgl_filt$counts, 
                 col = dgl_filt$colours, cex=1, cex.axis=1, cex.lab=1)
 
@@ -238,14 +239,9 @@ sapply(seq_along(norm_list) ,function(x, n, i){
        bty="n",
        cex = 0.5, inset = c(.01,.01) )}, x = norm_list, n = names(norm_list))
 dev.off()
+
 #cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, prior.count=5)
 
-#EDASeq::plotRLE(cpm_TMM, col=dgl_filt$colours, 
-#                outline=FALSE, las=3, ylab="Relative Log Expression", 
-#                cex.axis=1, cex.lab=1, main = "TMM")
-
-#write_rds(x1_TMM,str_glue("x1_TMMwzp_{experiment}_{todate}.rds"))
-#x1_voomTMM <- read_rds("~/Documents/new_analysis_workflow/results_R/results_with_DBs/3_IPP_PIWIL1_all_DBs/x1_voomTMM.rds")
 ```
 
 ## make h-clustering
@@ -256,14 +252,13 @@ norm_l <- list(
                "TMMwsp" = cpm(edger_norm[[3]],normalized.lib.sizes = TRUE, log=TRUE, prior.count=5),
                "voomQ_QW" = voomQW_norm[[1]]$E,
                "voomTMM_QW" = voomQW_norm[[2]]$E,
-               "voomTMM_QW" = voomQW_norm[[3]]$E)
+               "voomTMMwsp_QW" = voomQW_norm[[3]]$E)
 
 hc_methods <- c("ward.D2",
-                "single",
+                #"single","median", "centroid","mcquitty")
                 "complete",
-                "average",
-                #"median", "centroid",
-                "mcquitty")
+                "average")
+                
 l_d <- lapply(norm_l,function(x)dist(t(x)))
 
 l_hc <- sapply(hc_methods, function(x) lapply(l_d, function(y) hclust(y,method = x)))
@@ -274,7 +269,7 @@ pdf(str_glue("{dat_path}/hierarchic_clust_{todate}_{my_exp}.pdf"))
 for (i in seq_along(l_hc)) {
   myplclust(l_hc[[i]],
             lab.col = dgl_filt$colours, #x1$colours,pal1$value
-            labels = dgl_filt$samples$group,#pal1$group
+            #labels = dgl_filt$samples$ ,  
        xlab = str_glue("{names(l_hc[i])}"),
        main = str_glue("{enframe(l_hc[[i]])$value[7]} - {enframe(l_hc[[i]])$value[5]} - group"))
   legend("topright",
@@ -285,6 +280,135 @@ for (i in seq_along(l_hc)) {
 }
 dev.off()
 ```
+
+## make MDS plot
+```{r}
+par(mfrow=c(2,2))
+par(mar=c(6,5,2,1)+ 0.1)
+
+pdf(str_glue("{dat_path}/MDS_plot_{todate}_{my_exp}.pdf"))
+
+plotMDS(norm_l[[4]],labels = ,
+                col=dgl_filt$colours,dim.plot = c(1,2))
+legend("topright",
+       legend= levels(targets_file$group),
+       fill = levels(as_factor(dgl_filt$colours)),
+       bty="n",
+       cex = 1.5, inset = c(.01,.09) )
+
+plotMDS(norm_l[[4]], labels = ,
+                col=dgl_filt$colours,dim.plot = c(3,4),main="MDS plot")
+dev.off()
+```
+
+## make PCA plot
+```{r}
+library(DESeq2)
+# make the Deseq dataset -----
+dds <- DESeqDataSetFromMatrix(countData = round(dgl_filt$counts),
+                              colData = targets_file,
+                              design = ~ group )
+dds$group <- relevel(dds$group, ref = "Control")
+
+#vst -----
+vsd <- vst(dds, blind = FALSE)
+
+head(assay(vsd), 3)
+
+sampleDists <- dist(t(assay(vsd)))
+sampleDistMatrix <- as.matrix( sampleDists )
+suppressPackageStartupMessages({
+library("pheatmap")
+library("RColorBrewer")})
+sampleDistMatrix <- as.matrix( sampleDists )
+rownames(sampleDistMatrix) <- paste( vsd$Run, vsd$group, sep = " - " )
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows = sampleDists,
+         clustering_distance_cols = sampleDists,
+         col = colors)
+#rlog -----
+rld <- rlog(dds, blind = FALSE)
+
+dds1 <- estimateSizeFactors(dds)
+# check the transformations -----
+df <- bind_rows(
+  as_tibble(log2(counts(dds1, normalized=TRUE)[, 1:2]+1)) %>%
+    mutate(transformation = "log2(x + 1)"),
+  as_tibble(assay(vsd)[, 1:2]) %>% mutate(transformation = "vst"),
+  as_tibble(assay(rld)[, 1:2]) %>% mutate(transformation = "rlog"))
+
+colnames(df)[1:2] <- c("x", "y")  
+# plot them
+ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
+  coord_fixed() + facet_grid( . ~ transformation)  
+# PCA -----
+pdf(str_glue("{dat_path}/PCA_plot_{todate}_{my_exp}.pdf"))
+DESeq2::plotPCA(vsd, intgroup = "group")
+dev.off()
+# MDS -----
+mds <- as.data.frame(colData(vsd))  %>%
+  cbind(cmdscale(sampleDistMatrix))
+ggplot(mds, aes(x = `1`, y = `2`, color = group)) +
+  geom_point(size = 3) + coord_fixed()
+
+```
+## DE analysis 
+```{r}
+# DEseq2 ----
+dds <- DESeq(dds)
+res <- results(dds)
+summary(res)
+resultsNames(dds)
+
+res_AD_vs_Control <- results(dds, name="group_AD_vs_Control" , alpha = 0.05) %>% 
+  as_tibble(rownames = "GeneID") %>% 
+  arrange(padj) %>% 
+  write_tsv(str_glue("{dat_path}/DEseq2_AD_vs_Ctl_{todate}_{my_exp}.txt"))
+
+hist(res_AD_vs_Control$pvalue[res_AD_vs_Control$baseMean > 1], 
+     breaks = 0:20/20,
+     col = "grey50", border = "white")
+
+# edgeR  ----
+plotMD(x1_TMM,column = 4)
+x1_TMM <- estimateDisp(x1_TMM, design=design, robust=TRUE)
+plotBCV(x1_TMM)
+fit <- glmQLFit(x1_TMM, design, robust = TRUE)
+head(fit$coefficients)
+plotQLDisp(fit)
+
+con_mat <- makeContrasts(
+  IPP_C_vs_noAb = IPP_C_Ab-IPP_noAb,
+  IPP_N_vs_noAb = IPP_N_Ab-IPP_noAb,
+  IPP_INPUT_vs_noAb = IPP_INPUT-IPP_noAb,
+  IPP_C_vs_INPUT = IPP_C_Ab-IPP_INPUT,
+  IPP_N_vs_INPUT = IPP_N_Ab-IPP_INPUT,
+  levels = design
+)
+
+res_AD_vs_Control <- glmQLFTest(fit,coef = 2)
+
+res_C_nAb <- glmQLFTest(fit,contrast = 0)
+
+
+is.de <- decideTests(res_AD_vs_Control)
+summary(is.de)
+plotMD(res_AD_vs_Control,status = is.de,values = c(1,-1),
+       col = c("red","blue"),legend="topright")
+top<- topTags(res_AD_vs_Control,n=100)
+res %>% as_tibble()
+path <- "data/new_analysis_workflow/test_DE_methods/IP_DATA/"
+
+topres_AD_vs_Control <- topTags(res_AD_vs_Control, n = nrow(res_AD_vs_Control), 
+                            adjust.method = "BH", 
+                            sort.by = "PValue", 
+                            p.value = 1)$table %>% 
+  as_tibble(rownames = "smallRNA") %>% 
+  write_tsv(str_glue("{writting_path}res_AD_vs_Ctrl_edger_{date}_{my_exp}.txt"))
+```
+
 
 ## remove unwanted variation
 ```{r}
