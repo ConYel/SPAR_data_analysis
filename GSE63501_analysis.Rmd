@@ -1,7 +1,7 @@
 ---
-title: "R Notebook, analysis of brain samples, different sections"
+title: "R Notebook, analysis of brain samples, GSE63501"
 author: "Constantinos Yeles"
-date: "`r format(Sys.time(), '%a_%b_%d_%Y')`"
+todate: "`r format(Sys.time(), '%a_%b_%d_%Y')`"
 output:
   pdf_document: default
   html_document:
@@ -14,20 +14,20 @@ editor_options:
 suppressPackageStartupMessages(library('tidyverse'))
 suppressPackageStartupMessages(library('data.table'))
 ```
-## add date
-```{r date_of_analysis}
-date <- format(Sys.time(), "%d_%b_%Y")
+## add todate
+```{r todate_of_analysis}
+todate <- format(Sys.time(), "%d_%b_%Y")
 ```
 ## create the dir for the analysis
 ```{r}
-my_exp <- "brain_diff_sect"
+my_exp <- "GSE63501_analysis"
 dir.create(str_glue("/home/0/SPAR_data_analysis/{my_exp}_analysis"))
 dat_path <- str_glue("{my_exp}_analysis")
 ```
 
 ## import data and make dataframe
 ```{r create_the_df}
-path <- "/home/0/my_data/SPAR_res"
+path <- "/home/0/geobrain/GSE63501_16_CTRL_AD"
 smallRNA_files <- dir(path, full.names = TRUE,
                       pattern = "smRNA_gene_expression.xls",
                       recursive = TRUE)
@@ -46,11 +46,11 @@ DT <- rbindlist(sapply(smallRNA_files,fread,
 # make matrix for DE analysis  -----
 dt <- DT %>% group_by(file) %>% select(-RPM) %>%
   spread(key = "file", value = "ReadCount" )
+
 # clean the colnames
 names(dt)[3:length(names(dt))] <- names(dt)[3:length(names(dt))] %>%
-  str_remove(".+/SPAR_res/") %>%
-  str_remove(".trimmed_.+") %>%
-  str_replace("^?","S")
+  str_remove(".+/GSE63501_16_CTRL_AD/") %>%
+  str_remove(".trimmed_.+") 
 
 # load the targets file ----
 targ_path <- dir(path = path, 
@@ -67,7 +67,7 @@ targets_file <- targets_file %>%
          Dev_stage == "Adult",
          !Single_pool == "Single",
          !is.na(Sample_id)) %>% 
-  dplyr::select(samples = "Samples", Sample_id, Date_of_seq, Total_region,
+  dplyr::select(samples = "Samples", Sample_id, todate_of_seq, Total_region,
          Reads, Sex, Age, Single_pool) %>% 
   mutate_if(is.character, as_factor) 
   
@@ -83,11 +83,13 @@ names(dt)[tardt] <- as.character(targets_file$samples[target])
 stopifnot(identical(targets_file$Sample_id,names(dt)[3:length(names(dt))]))
 
 # write the results  -----
-dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{date}_{my_exp}_SPAR.txt"))
+dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{todate}_{my_exp}_SPAR.txt"))
 ```
 
 ## Perform various Filtering Methods: EdgeR, NOIseq
 ```{r}
+# load dataset
+DT
 suppressPackageStartupMessages(library('edgeR'))
 suppressPackageStartupMessages(library('NOIseq'))# there is a problem loading it 
 # I load it manually 
@@ -101,7 +103,20 @@ mat <- dt %>%
   select(-GeneClass) %>%
   column_to_rownames("smallRNA") %>%
   as.matrix()
+# explore with NOISeq -----
+dt <- DT %>% as_tibble %>% 
+  dplyr::select(smallRNA, GeneClass, as.character(samples$Sample_id))
 
+mybiotypes <-  DT$GeneClass
+names(mybiotypes) <-  DT$smallRNA
+
+mat <- dt %>% 
+  select(-GeneClass) %>% 
+  column_to_rownames("smallRNA") %>% 
+  as.matrix()
+
+
+mydata <- readData(data = mat, factors = as.data.frame(samples), biotype = mybiotypes)
 # filtering with NOISEq  -----
 noiL <- as.list(1L:3)
 names(noiL) <- c("cpm", "Wilcoxon", "Prop")
@@ -114,16 +129,6 @@ NOISeq_filt <- lapply(noiL, function(x) NOISeq::filtered.data(mat,
 targets_file <- targets_file %>% dplyr::rename(group = "Total_region")
 design <- model.matrix(~targets_file$group)
 colnames(design) <- gsub("targets_file\\$group","",colnames(design))
-rownames(design) <- targets_file$group
-# another design considering batch ----
-design <- model.matrix(~0 + targets_file$group + 
-                         targets_file$Date_of_seq)
-
-colnames(design) <- colnames(design) %>% 
-  str_remove("targets_file\\$group") %>% 
-  str_remove("targets_file\\$Date_of_seq") 
-  str_remove("targets_file\\$Sex") %>% 
-  str_remove("targets_file\\$Donors")
 rownames(design) <- targets_file$group
 
 # create the DGElist ----
@@ -179,7 +184,7 @@ AveLogCpm_Filtered_Data <-aveLogCPM(dgl_filt)
 
 par(mfrow=c(1,2))
 
-pdf(str_glue("{dat_path}/histogram_plot_{date}_{my_exp}.pdf"))
+pdf(str_glue("{dat_path}/histogram_plot_{todate}_{my_exp}.pdf"))
 hist(AveLogCpm_Raw_Data)
 hist(AveLogCpm_Filtered_Data)
 dev.off()
@@ -215,7 +220,6 @@ voomQW_norm <- mapply(function(x, i)
   c("quantile", rep("none",2)), SIMPLIFY = FALSE 
 )
 # create list of normalized data ------
-
 norm_list <- list("Not normalized" = cpm(edger_norm[[1]],normalized.lib.sizes = TRUE), 
                   "EDA_upperQ" = dataOffset, 
                   "TMM" = cpm(edger_norm[[2]],normalized.lib.sizes = TRUE),
@@ -225,7 +229,7 @@ norm_list <- list("Not normalized" = cpm(edger_norm[[1]],normalized.lib.sizes = 
                   "voom_TMM" = 2^voomQW_norm[[2]]$E,
                   "voom_TMMwsp" = 2^voomQW_norm[[3]]$E)
 
-pdf(str_glue("{dat_path}/RLE_plots_{date}_{my_exp}.pdf"))
+pdf(str_glue("{dat_path}/RLE_plots_{todate}_{my_exp}.pdf"))
 
 sapply(seq_along(norm_list) ,function(x, n, i){ 
        EDASeq::plotRLE(x[[i]], col=dgl_filt$colours,
@@ -238,15 +242,13 @@ sapply(seq_along(norm_list) ,function(x, n, i){
        bty="n",
        cex = 0.5, inset = c(.01,.01) )}, x = norm_list, n = names(norm_list))
 dev.off()
-
-
 #cpm_TMM <- cpm(x1_TMM,normalized.lib.sizes = TRUE, prior.count=5)
 
 #EDASeq::plotRLE(cpm_TMM, col=dgl_filt$colours, 
 #                outline=FALSE, las=3, ylab="Relative Log Expression", 
 #                cex.axis=1, cex.lab=1, main = "TMM")
 
-#write_rds(x1_TMM,str_glue("x1_TMMwzp_{experiment}_{date}.rds"))
+#write_rds(x1_TMM,str_glue("x1_TMMwzp_{experiment}_{todate}.rds"))
 #x1_voomTMM <- read_rds("~/Documents/new_analysis_workflow/results_R/results_with_DBs/3_IPP_PIWIL1_all_DBs/x1_voomTMM.rds")
 ```
 
@@ -272,7 +274,7 @@ l_hc <- sapply(hc_methods, function(x) lapply(l_d, function(y) hclust(y,method =
 
 names(l_hc) <- rep(rownames(l_hc),times = ncol(l_hc))
 
-pdf(str_glue("{dat_path}/hierarchic_clust_{date}_{my_exp}.pdf"))
+pdf(str_glue("{dat_path}/hierarchic_clust_{todate}_{my_exp}.pdf"))
 for (i in seq_along(l_hc)) {
   myplclust(l_hc[[i]],
             lab.col = dgl_filt$colours, #x1$colours,pal1$value
@@ -285,37 +287,18 @@ for (i in seq_along(l_hc)) {
        bty="n",
        cex = 0.9)
 }
-
-#sapply(l_hc,function(x)myplclust(x,lab.col = x1$colours,labels = x1_TMM$samples$group,
-#       xlab = str_glue("{names(x)}"), main = str_glue("{enframe(x)$value[7]} - {enframe(x)$value[5]} - region")))
-
 dev.off()
-
-#d <- dist(t(lcpm_TMM))
-#par(mar=c(7,3,2,2))
-#myplclust(hc,lab.col = x1$colours,labels = x1_TMM$samples$group,
-#          xlab = "",main="euclidean-ward.D2 - region")
-#myplclust(hc,lab.col = x1$colours,labels = targets_file$Years,
-#          xlab = "",main="euclidean-ward.D2 - age")
-#myplclust(hc,lab.col = x1$colours,labels = targets_file$data_sequenziamento,
-#          xlab = "",main="euclidean-ward.D2 - year of run")
-
-#legend("topright",legend = levels(group),
-#       fill = x1$colours,
-#       bty="n",
-#       cex = 0.6)
-
 ```
 
 ## remove unwanted variation
 ```{r}
 suppressPackageStartupMessages(library('sva'))
 # full model
-mod <-  model.matrix(~dgl_filt$samples$group+dgl_filt$samples$Date_of_seq,
+mod <-  model.matrix(~dgl_filt$samples$group+dgl_filt$samples$todate_of_seq,
                      data = dgl_filt$samples)
 colnames(mod) <- colnames(mod) %>% 
   str_remove("dgl_filt\\$samples\\$group") %>% 
-  str_remove("dgl_filt\\$samples\\$Date_of_seq") 
+  str_remove("dgl_filt\\$samples\\$todate_of_seq") 
   str_remove("targets_file\\$Sex") %>% 
   str_remove("targets_file\\$Donors")
 
@@ -335,7 +318,7 @@ fit = lmFit(voomQW_norm[[1]],modSv)
 # combat
 norm_l[["TMM"]]
 modcombat <-  model.matrix(~1, data=dgl_filt$samples)
-combat_edata <- ComBat(norm_l[["TMM"]], batch = dgl_filt$samples$Date_of_seq,
+combat_edata <- ComBat(norm_l[["TMM"]], batch = dgl_filt$samples$todate_of_seq,
                        mod = modcombat, par.prior = TRUE,
                        prior.plots = FALSE,
   mean.only = FALSE, ref.batch = NULL, BPPARAM = bpparam("SerialParam"))
@@ -344,7 +327,7 @@ qValuesComBat = p.adjust(pValuesComBat,method="BH")
 
 #limma remove batch effect
 norm_l[["TMM"]] %>% plotMDS(labels = dgl_filt$samples$group, col = dgl_filt$colours)
-logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$Date_of_seq)
+logCPM <- removeBatchEffect(norm_l[["TMM"]] ,batch = dgl_filt$samples$todate_of_seq)
   plotMDS(logCPM,
   labels = dgl_filt$samples$group,
                 col = dgl_filt$colours,dim.plot = c(3,4))
@@ -376,10 +359,10 @@ scaled_mat <- t(scale(t(as.matrix(logCPM_fil))))
 scaled_mat <- t(scale(t(as.matrix(logCPM))))
 hist(scaled_mat)
 df <- dgl_filt$samples %>% 
-  select(group, Date_of_seq, Sex, Age)
+  select(group, todate_of_seq, Sex, Age)
 
 data.frame(Brain_partition = dgl_filt$samples$group,
-                 Date_of_seq)  
+                 todate_of_seq)  
 
 
 ha <- HeatmapAnnotation(df = df)
@@ -387,7 +370,7 @@ f <- colorRamp2(c(-2,median(scaled_mat),2),c("blue","white","yellow"))
 
 # plot Heatmap
 # cluster rows and columns
-pdf(str_glue("{dat_path}/Heatmap_{date}_{my_exp}.pdf"))
+pdf(str_glue("{dat_path}/Heatmap_{todate}_{my_exp}.pdf"))
 Heatmap(scaled_mat,
         top_annotation = ha,
         col=f,

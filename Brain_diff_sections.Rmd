@@ -548,9 +548,6 @@ mapply(function(x, i)
   names(mynoiseDE_sep) , SIMPLIFY = FALSE 
 )
 
-
-
-
 complete_DEs <- bind_rows(mynoiseDE2, .id = "comparison") %>% 
   select(comparison, smallRNA, 
          Biotype, log2FC = "M", prob,Total_mean, everything()) %>% 
