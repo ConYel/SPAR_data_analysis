@@ -362,7 +362,7 @@ res <- results(dds)
 summary(res)
 resultsNames(dds)
 
-res_AD_vs_Control <- results(dds, name="group_AD_vs_Control" , alpha = 0.05) %>% 
+DEseq2_res_AD_vs_Control <- results(dds, name= "group_AD_vs_Control", alpha = 0.05) %>% 
   as_tibble(rownames = "GeneID") %>% 
   arrange(padj) %>% 
   write_tsv(str_glue("{dat_path}/DEseq2_AD_vs_Ctl_{todate}_{my_exp}.txt"))
@@ -372,41 +372,68 @@ hist(res_AD_vs_Control$pvalue[res_AD_vs_Control$baseMean > 1],
      col = "grey50", border = "white")
 
 # edgeR  ----
-plotMD(x1_TMM,column = 4)
-x1_TMM <- estimateDisp(x1_TMM, design=design, robust=TRUE)
-plotBCV(x1_TMM)
-fit <- glmQLFit(x1_TMM, design, robust = TRUE)
+plotMD(edger_norm[[4]],column = 3)
+plotMD(edger_norm[[4]],column = 4)
+x1_TMMwsp <- estimateDisp(edger_norm[[4]], design=design, robust=TRUE)
+plotBCV(x1_TMMwsp)
+fit <- glmQLFit(x1_TMMwsp, design, robust = TRUE)
 head(fit$coefficients)
 plotQLDisp(fit)
 
-con_mat <- makeContrasts(
-  IPP_C_vs_noAb = IPP_C_Ab-IPP_noAb,
-  IPP_N_vs_noAb = IPP_N_Ab-IPP_noAb,
-  IPP_INPUT_vs_noAb = IPP_INPUT-IPP_noAb,
-  IPP_C_vs_INPUT = IPP_C_Ab-IPP_INPUT,
-  IPP_N_vs_INPUT = IPP_N_Ab-IPP_INPUT,
-  levels = design
-)
+#con_mat <- makeContrasts(
+# IPP_N_vs_INPUT = IPP_N_Ab-IPP_INPUT,
+#  levels = design)
 
-res_AD_vs_Control <- glmQLFTest(fit,coef = 2)
-
-res_C_nAb <- glmQLFTest(fit,contrast = 0)
-
-
-is.de <- decideTests(res_AD_vs_Control)
+edgeR_res_AD_vs_Control <- glmQLFTest(fit,coef = 2)
+is.de <- decideTests(edgeR_res_AD_vs_Control)
 summary(is.de)
-plotMD(res_AD_vs_Control,status = is.de,values = c(1,-1),
-       col = c("red","blue"),legend="topright")
-top<- topTags(res_AD_vs_Control,n=100)
+
+plotMD(edgeR_res_AD_vs_Control,
+       status = is.de,
+       values = c(1,-1),
+       col = c("red","blue"),
+       legend="topright")
+
+top <- topTags(edgeR_res_AD_vs_Control,n=100)
 res %>% as_tibble()
 path <- "data/new_analysis_workflow/test_DE_methods/IP_DATA/"
 
-topres_AD_vs_Control <- topTags(res_AD_vs_Control, n = nrow(res_AD_vs_Control), 
+topedgeR_res_AD_vs_Control <- topTags(edgeR_res_AD_vs_Control, 
+                            n = nrow(edgeR_res_AD_vs_Control), 
                             adjust.method = "BH", 
                             sort.by = "PValue", 
                             p.value = 1)$table %>% 
   as_tibble(rownames = "smallRNA") %>% 
-  write_tsv(str_glue("{writting_path}res_AD_vs_Ctrl_edger_{date}_{my_exp}.txt"))
+  write_tsv(str_glue("{dat_path}/edgeR_res_AD_vs_Ctl_{date}_{my_exp}.txt"))
+
+
+# voom   ----
+vfit <- lmFit(voomQW_norm[[1]], design=design)
+vfit <- contrasts.fit(vfit,coefficients = 2)
+vfit <- eBayes(vfit,robust = TRUE,trend = TRUE)
+
+results <- decideTests(vfit)
+a <- vennCounts(results)
+mfrow.old <- par()$mfrow
+par(mfrow=c(1,2))
+vennDiagram(a)
+vennDiagram(results, 
+    include=c("up", "down"),
+    counts.col=c("red", "blue"),
+    circle.col = c("red", "blue", "green3"))
+par(mfrow=mfrow.old)
+
+#IPP_C_vs_noAb
+toplvoom_res_AD_vs_Control  <- topTable(vfit,
+                             coef = 1,
+                             confint=TRUE,
+                             number = nrow(vfit),
+                             adjust.method = "fdr",
+                             sort.by = "p") %>% 
+  as_tibble(rownames = "smallRNA") %>% 
+  write_tsv(str_glue("{dat_path}/voom_res_AD_vs_Ctl_{todate}_{my_exp}.txt"))
+
+
 ```
 
 
