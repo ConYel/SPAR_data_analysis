@@ -11,8 +11,10 @@ editor_options:
 ---
 ## load libraries
 ```{r load libraries}
-suppressPackageStartupMessages(library('tidyverse'))
-suppressPackageStartupMessages(library('data.table'))
+suppressPackageStartupMessages({
+  library('tidyverse')
+  library('data.table')
+})
 ```
 ## add todate
 ```{r todate_of_analysis}
@@ -58,15 +60,13 @@ targ_path <- dir(path = path,
                  full.names = T,
                  recursive = TRUE)
 
-targets_file <- fread(targ_path) %>%
-  as_tibble() 
-
-targets_file <- targets_file %>% 
+targets_file <- fread(targ_path) %>% 
+  as_tibble() %>% 
   dplyr::select(Run, BioSample, classification, Instrument) %>% 
   mutate_if(is.character, as_factor) 
 
-target <- match(names(dt),targets_file$Sample_id, nomatch = 0)
-tardt <- match(targets_file$Sample_id, names(dt), nomatch = 0)
+target <- match(names(dt),targets_file$Run, nomatch = 0)
+tardt <- match(targets_file$Run, names(dt), nomatch = 0)
 #dt1 <- dt
 names(dt)[tardt] <- as.character(targets_file$samples[target])
 
@@ -79,12 +79,12 @@ dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{todate}_{my_exp}_SPAR.txt"))
 ## Perform various Filtering Methods: EdgeR, NOIseq
 ```{r}
 # load dataset ----
-DT <- fread(list.files(path = dat_path, pattern = "raw" ))
+DT <- fread(list.files(path = dat_path, pattern = "raw", full.names = TRUE ))
 suppressPackageStartupMessages(library('edgeR'))
 suppressPackageStartupMessages(library('NOIseq'))# there is a problem loading it 
 # I load it manually 
 suppressPackageStartupMessages(library('rafalib'))
-stopifnot(identical(targets_file$Run,names(dt)[3:length(names(dt))]))
+stopifnot(identical(as.character(targets_file$Run),names(dt)[3:length(names(dt))]))
 # exploratory analysis with NOISeq -----
 mybiotypes <-  dt$GeneClass
 names(mybiotypes) <-  dt$smallRNA
@@ -113,6 +113,10 @@ sapply(seq(ncol(mat)) ,function(x){
 explo.plot(mycountsbio, toplot = 2, samples = x, plottype = "boxplot")
 })
 dev.off()
+
+# remove one sample ----
+mat <- mat[,!colnames(mat) %in% c("Ctl_SRR1658345","AD_SRR1658353")]
+targets_file <- targets_file %>% filter(!Run %in% c("Ctl_SRR1658345","AD_SRR1658353"))
 # filtering with NOISEq  -----
 noiL <- as.list(1L:3)
 names(noiL) <- c("cpm", "Wilcoxon", "Prop")
@@ -128,7 +132,6 @@ colnames(design) <- gsub("targets_file\\$group","",colnames(design))
 rownames(design) <- targets_file$group
 
 # create the DGElist ----
-
 dgl <- DGEList(counts = mat,
                samples = targets_file,
                lib.size = colSums(mat),
@@ -298,6 +301,14 @@ legend("topright",
 
 plotMDS(norm_l[[4]], labels = ,
                 col=dgl_filt$colours,dim.plot = c(3,4),main="MDS plot")
+
+plotMDS(norm_l[[4]], labels = ,
+                col=dgl_filt$colours,dim.plot = c(1,3),main="MDS plot")
+
+plotMDS(norm_l[[4]], labels = ,
+                col=dgl_filt$colours,dim.plot = c(2,3),main="MDS plot")
+plotMDS(norm_l[[4]], labels = ,
+                col=dgl_filt$colours,dim.plot = c(2,4),main="MDS plot")
 dev.off()
 ```
 
@@ -367,16 +378,23 @@ DEseq2_res_AD_vs_Control <- results(dds, name= "group_AD_vs_Control", alpha = 0.
   arrange(padj) %>% 
   write_tsv(str_glue("{dat_path}/DEseq2_AD_vs_Ctl_{todate}_{my_exp}.txt"))
 
-hist(res_AD_vs_Control$pvalue[res_AD_vs_Control$baseMean > 1], 
+hist(DEseq2_res_AD_vs_Control$pvalue[DEseq2_res_AD_vs_Control$baseMean > 1], 
      breaks = 0:20/20,
      col = "grey50", border = "white")
-
+deseq2_p <- DEseq2_res_AD_vs_Control %>% 
+  mutate(DEseq2 = if_else(
+    padj >= 0.05, 0, if_else(
+      log2FoldChange > 0, 1, -1
+    )
+  )) %>% 
+  select(smallRNA = "GeneID", DEseq2 )
 # edgeR  ----
+edger_norm %>% names()
 plotMD(edger_norm[[4]],column = 3)
 plotMD(edger_norm[[4]],column = 4)
-x1_TMMwsp <- estimateDisp(edger_norm[[4]], design=design, robust=TRUE)
-plotBCV(x1_TMMwsp)
-fit <- glmQLFit(x1_TMMwsp, design, robust = TRUE)
+x1_TMM <- estimateDisp(edger_norm[[3]], design=design, robust=TRUE)
+plotBCV(x1_TMM)
+fit <- glmQLFit(x1_TMM, design, robust = TRUE)
 head(fit$coefficients)
 plotQLDisp(fit)
 
@@ -404,11 +422,23 @@ topedgeR_res_AD_vs_Control <- topTags(edgeR_res_AD_vs_Control,
                             sort.by = "PValue", 
                             p.value = 1)$table %>% 
   as_tibble(rownames = "smallRNA") %>% 
-  write_tsv(str_glue("{dat_path}/edgeR_res_AD_vs_Ctl_{date}_{my_exp}.txt"))
+  write_tsv(str_glue("{dat_path}/edgeR_res_AD_vs_Ctl_{todate}_{my_exp}.txt"))
 
+hist(topedgeR_res_AD_vs_Control$PValue, 
+     breaks = 0:20/20,
+     col = "grey50", border = "white")
 
-# voom   ----
-vfit <- lmFit(voomQW_norm[[1]], design=design)
+edgeR_p <- topedgeR_res_AD_vs_Control %>% 
+  mutate(edgeR = if_else(
+    FDR >= 0.05, 0, if_else(
+      logFC > 0, 1, -1
+    )
+  )) %>% 
+  select(smallRNA , edgeR )
+
+# voom  ----
+voomQW_norm %>% names
+vfit <- lmFit(voomQW_norm[[2]], design=design)
 vfit <- contrasts.fit(vfit,coefficients = 2)
 vfit <- eBayes(vfit,robust = TRUE,trend = TRUE)
 
@@ -423,7 +453,6 @@ vennDiagram(results,
     circle.col = c("red", "blue", "green3"))
 par(mfrow=mfrow.old)
 
-#IPP_C_vs_noAb
 toplvoom_res_AD_vs_Control  <- topTable(vfit,
                              coef = 1,
                              confint=TRUE,
@@ -431,9 +460,31 @@ toplvoom_res_AD_vs_Control  <- topTable(vfit,
                              adjust.method = "fdr",
                              sort.by = "p") %>% 
   as_tibble(rownames = "smallRNA") %>% 
-  write_tsv(str_glue("{dat_path}/voom_res_AD_vs_Ctl_{todate}_{my_exp}.txt"))
+  write_tsv(str_glue("{dat_path}/voomQW_TMM_res_AD_vs_Ctl_{todate}_{my_exp}.txt"))
 
+hist(toplvoom_res_AD_vs_Control$P.Value, 
+     breaks = 0:20/20,
+     col = "grey50", border = "white")
 
+voomQW_p <- toplvoom_res_AD_vs_Control %>% 
+  mutate(voomQW = if_else(
+    adj.P.Val >= 0.05, 0, if_else(
+      logFC > 0, 1, -1
+    )
+  )) %>% 
+  select(smallRNA , voomQW )
+
+# venn diagram for voom, DEseq2, edger -----
+ results <-  deseq2_p %>% 
+  inner_join(voomQW_p) %>% 
+  inner_join(edgeR_p) %>% select(-smallRNA)
+
+pdf(str_glue("{dat_path}/venn_diagram_DE_{todate}_{my_exp}.pdf"))
+vennDiagram(results, 
+    include=c("up", "down"),
+    counts.col=c("red", "blue"),
+    circle.col = c("red", "blue", "green3"))
+dev.off()
 ```
 
 
