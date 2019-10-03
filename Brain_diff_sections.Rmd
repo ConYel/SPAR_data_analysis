@@ -109,7 +109,6 @@ suppressPackageStartupMessages({
   library('NOIseq')
   })
 
-
 #subset the dataset
 dt <- dt[c(1,2, tardt)]
 # make the matrix  -----
@@ -453,7 +452,10 @@ samples <- read_tsv(path_tar) %>%
   mutate(Total_region = str_replace(Total_region," ","_")) %>% 
   mutate_if(is.character, as_factor) 
 
-samples <- samples %>% droplevels()
+samples <- samples %>% 
+  filter(!Date_of_seq == "05/12/2014") %>% 
+  rename(group ="Total_region")
+  droplevels()
 
 dt <- DT %>% as_tibble %>% 
   dplyr::select(smallRNA, GeneClass, as.character(samples$Sample_id))
@@ -465,7 +467,6 @@ mat <- dt %>%
   select(-GeneClass) %>% 
   column_to_rownames("smallRNA") %>% 
   as.matrix()
-
 
 mydata <- readData(data = mat, factors = as.data.frame(samples), biotype = mybiotypes)
 
@@ -479,7 +480,8 @@ explo.plot(mycountsbio, samples = NULL, toplot = 1, plottype = "barplot")
 myfilt <- filtered.data(mat, factor = "Total_region",
                         norm = FALSE, depth = NULL,
                         method = 1, cv.cutoff = 100, cpm = 1)
-myfiltdata <- readData(data = myfilt, factors = as.data.frame(samples),
+myfiltdata <- readData(data = myfilt, 
+                       factors = as.data.frame(samples),
                        biotype = mybiotypes)
 
 #  5.4 NOISEQ DE with one sample -----
@@ -488,7 +490,8 @@ myresults <- noiseq(myfiltdata,
                     conditions = c("COLO205","CACO2"),
                     k = NULL,
                     norm = "tmm", pnr = 0.2,
-                    nss = 5, v = 0.02, lc = 1, replicates = "no")
+                    nss = 5, v = 0.02, lc = 1, 
+                    replicates = "no")
 
 mynoiseDE <- degenes(myresults, q = 0.9, M = NULL)
 mynoiseDE %>% 
@@ -568,6 +571,27 @@ piRname <- piRNADE %>%
 piRNADE %>% 
   filter(smallRNA %in% piRname$smallRNA)
 
+piRname <- piRname %>% 
+separate("smallRNA",c("chr","start","end","strand","smallRNA","DQ"), sep = ":") %>%
+  unite("smallRNA_strand", strand, smallRNA ) %>% 
+  distinct(smallRNA_strand, .keep_all = T) %>% 
+  separate("smallRNA_strand", c("strand","smallRNA"), sep = "_") %>% 
+  unite("smallRNA", c("chr","start","end","strand","smallRNA","DQ"), sep = ":" ) 
+
+# tmm norm various samples ----
+exprs(myfiltdata)
+dglNois <- DGEList(counts = exprs(myfiltdata),
+               samples = samples)
+dglNois <- calcNormFactors(dglNois)
+normTMM <- cpm(dglNois, normalized.lib.sizes = TRUE, log = TRUE, prior.count = 5)
+normTMM <- normTMM %>% as_tibble(rownames = "smallRNA")
+identical(as_factor(names(normTMM[2:length(normTMM)])), samples$Sample_id)
+names(normTMM)[2:length(normTMM)] <- samples$samples %>% as.character()
+normTMM %>% 
+  write_tsv(str_glue("{dat_path}/cpm_TMM_{todate}_{my_exp}.txt"))
+
+piRname %>% 
+  write_tsv(str_glue("{dat_path}/lFCs_deduplicated_pirna_{todate}_{my_exp}.txt"))
 #  5.5 NOISEQ  heatmap -----
 library(ComplexHeatmap);library(circlize)
 mat <- fread(".txt") %>% 
@@ -577,27 +601,28 @@ mat <- fread(".txt") %>%
   select(-DB) %>% 
   column_to_rownames("sRNA") %>% as.matrix()
 
-mat <- dt %>% 
+mat <- normTMM %>% 
   filter(smallRNA %in% piRname$smallRNA) %>% 
-  select(-GeneClass) %>% 
-  arrange(STot_RNA_pool_Brain_miRNA_ATCACG_L006_R1_001) %>% 
+  #select(-GeneClass) %>% 
+  arrange(Tot_RNA_pool_Brain_miRNA) %>% 
   column_to_rownames("smallRNA") %>% as.matrix()
 
 
 scaled_mat <- t(scale(t(as.matrix(mat))))
 hist(scaled_mat)
 df <- samples %>% 
-  select( Date_of_seq, Total_region, Sex, Age) %>% 
+  select(-Sample_id, -Reads) %>% 
   base::as.data.frame()
   
-row_order1 <- names(sort(scaled_mat[,7]))
+row_order1 <- names(sort(desc(scaled_mat[,ncol(scaled_mat)])))
 f_col <- colorRamp2(c(-1,0,1),c("blue","black","yellow"))
 
 d1f <- df[7,] %>% select(Total_region)
+#d1f <- df[ncol(scaled_mat),] %>% select(group)
 ha <- HeatmapAnnotation(df = d1f, annotation_name_side = "left")
 # plot Heatmap
 # cluster only rows
-h1 <- Heatmap(scaled_mat[,7],
+h1 <- Heatmap(scaled_mat[,ncol(scaled_mat)],
         top_annotation = ha,
         col=f_col, width = unit(1, "cm"),
         show_row_dend = FALSE,
@@ -619,9 +644,16 @@ mat1 <- piRname %>%
 scaled_mat1 <- t(scale(t(as.matrix(mat1))))
 hist(scaled_mat1)
 f_col1 <- colorRamp2(c(-1,0,1),c("forestgreen","black","red"))
+
 df1 <- df %>% filter(!Total_region == "Total") %>% 
   rename(Region = "Total_region")
+df1 <- df %>% filter(!group == "Total", 
+                     !Single_pool == "Single" | group == "Cerebellum") %>% 
+  select(-Single_pool,-samples) %>% 
+  rename(Region = "group")
+
 ha1 <- HeatmapAnnotation(df = df1)
+scaled_mat1 <- scaled_mat1[,as.character(df1$Region)]
 h2 <- Heatmap(scaled_mat1,
         top_annotation = ha1,
        # row_order = row_order1,
