@@ -114,7 +114,7 @@ explo.plot(mycountsbio, toplot = 2, samples = x, plottype = "boxplot")
 })
 dev.off()
 
-# remove one sample ----
+# remove noisy samples ----
 mat <- mat[,!colnames(mat) %in% c("Ctl_SRR1658345","AD_SRR1658353")]
 targets_file <- targets_file %>% filter(!Run %in% c("Ctl_SRR1658345","AD_SRR1658353"))
 # filtering with NOISEq  -----
@@ -314,7 +314,7 @@ dev.off()
 
 ## make PCA plot
 ```{r}
-library(DESeq2)
+suppressPackageStartupMessages(library(DESeq2))
 # make the Deseq dataset -----
 dds <- DESeqDataSetFromMatrix(countData = round(dgl_filt$counts),
                               colData = targets_file,
@@ -388,6 +388,15 @@ deseq2_p <- DEseq2_res_AD_vs_Control %>%
     )
   )) %>% 
   select(smallRNA = "GeneID", DEseq2 )
+# region report for DEseq2 -----
+suppressPackageStartupMessages(library(regionReport))
+dir.create(str_glue("{dat_path}/DESeq2_report_{todate}"), recursive = TRUE)
+
+report <- DESeq2Report(dds, project = str_glue('DESeq2_{todate}_HTML_{my_exp}_report'),
+    intgroup = c('group'), outdir = str_glue("{dat_path}/DESeq2_report_{todate}"),
+    output = 'index', theme = theme_bw())
+
+
 # edgeR  ----
 edger_norm %>% names()
 plotMD(edger_norm[[4]],column = 3)
