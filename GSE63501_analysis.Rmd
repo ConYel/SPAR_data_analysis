@@ -80,8 +80,8 @@ dt %>% write_tsv(str_glue("{dat_path}/raw_reads_{todate}_{my_exp}_SPAR.txt"))
 ```{r}
 # load dataset ----
 DT <- fread(list.files(path = dat_path, pattern = "raw", full.names = TRUE ))
-suppressPackageStartupMessages(library('edgeR'))
-suppressPackageStartupMessages(library('NOIseq'))# there is a problem loading it 
+suppressPackageStartupMessages({library('edgeR')
+  library('NOIseq')})# there is a problem loading it 
 # I load it manually 
 suppressPackageStartupMessages(library('rafalib'))
 stopifnot(identical(as.character(targets_file$Run),names(dt)[3:length(names(dt))]))
@@ -392,7 +392,7 @@ deseq2_p <- DEseq2_res_AD_vs_Control %>%
 suppressPackageStartupMessages(library(regionReport))
 dir.create(str_glue("{dat_path}/DESeq2_report_{todate}"), recursive = TRUE)
 
-report <- DESeq2Report(dds, project = str_glue('DESeq2_{todate}_HTML_{my_exp}_report'),
+report <- DESeq2Report(dds, project = str_glue('DESeq2_{todate}_{my_exp}_HTML_report'),
     intgroup = c('group'), outdir = str_glue("{dat_path}/DESeq2_report_{todate}"),
     output = 'index', theme = theme_bw())
 
